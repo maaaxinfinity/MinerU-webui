@@ -319,20 +319,44 @@ def pdf_parse(pdf_path: str, progress=gr.Progress(), is_ocr=False, formula_enabl
         if markdown_content:
             # 改进图片路径替换逻辑，处理更多图片格式和路径情况
             import re
-            # 1. 处理基本的Markdown图片引用 ![]()
-            markdown_content = markdown_content.replace("![](", f"![](/file=.temp/{pdf_name}/")
             
-            # 2. 处理包含alt文本的图片引用 ![alt](path)，但避免处理外部链接
-            markdown_content = re.sub(r'!\[(.*?)\]\((?!http|https)([^)]+)\)', 
+            # 首先修复可能出现的双重路径问题
+            # 例如 /file=.temp/xxx//file=.temp/xxx/ -> /file=.temp/xxx/
+            double_path_pattern = r'/file=\.temp/([^/]+)//file=\.temp/([^/]+)/'
+            if re.search(double_path_pattern, markdown_content):
+                markdown_content = re.sub(double_path_pattern, r'/file=.temp/\1/', markdown_content)
+                logger.info("检测到并修复了双重路径问题")
+                
+            # 处理错误的图片路径，例如images/xxx被误替换为/file=.temp/xxx/images/xxx
+            wrong_image_path = r'/file=\.temp/([^/]+)/images/'
+            if re.search(wrong_image_path, markdown_content):
+                markdown_content = re.sub(wrong_image_path, r'/file=.temp/\1/images/', markdown_content)
+                logger.info("修复了错误的图片路径")
+            
+            # 防止重复替换，先检查markdown内容中是否已经包含/file=路径
+            if "/file=.temp/" not in markdown_content:
+                # 1. 处理基本的Markdown图片引用 ![]()
+                markdown_content = re.sub(r'!\[\]\((?!http|https|/file=)([^)]+)\)', 
+                                     r'![](/file=.temp/' + pdf_name + r'/\1)', 
+                                     markdown_content)
+                
+                # 2. 处理包含alt文本的图片引用 ![alt](path)，但避免处理外部链接和已处理的链接
+                markdown_content = re.sub(r'!\[(.*?)\]\((?!http|https|/file=)([^)]+)\)', 
                                      r'![\1](/file=.temp/' + pdf_name + r'/\2)', 
                                      markdown_content)
-            
-            # 3. 处理HTML图片标签
-            markdown_content = re.sub(r'<img\s+src=["\'](?!http|https)([^"\']+)["\']', 
+                
+                # 3. 处理HTML图片标签
+                markdown_content = re.sub(r'<img\s+src=["\'](?!http|https|/file=)([^"\']+)["\']', 
                                      r'<img src="/file=.temp/' + pdf_name + r'/\1"', 
                                      markdown_content)
-            
-            logger.info("处理完成，已替换所有图片路径")
+                
+                logger.info("处理完成，已替换所有图片路径")
+            else:
+                logger.info("图片路径已包含/file=前缀，跳过重复替换")
+                
+                # 修复路径中的特殊模式
+                # 处理存在的双斜杠问题，如 /file=.temp/xxx//images/ -> /file=.temp/xxx/images/
+                markdown_content = re.sub(r'(/file=\.temp/[^/]+/)/', r'\1', markdown_content)
         else:
             logger.warning("处理完成，但markdown内容为空")
         
@@ -632,6 +656,17 @@ if __name__ == '__main__':
                 preview = update_preview(page_num, preview_images)
                 markdown = update_markdown(page_num, markdown_pages)
                 
+                # 修复markdown中可能存在的图片路径问题
+                if markdown:
+                    import re
+                    # 修复双重路径问题
+                    double_path_pattern = r'/file=\.temp/([^/]+)//file=\.temp/([^/]+)/'
+                    if re.search(double_path_pattern, markdown):
+                        markdown = re.sub(double_path_pattern, r'/file=.temp/\1/', markdown)
+                    
+                    # 修复双斜杠问题
+                    markdown = re.sub(r'(/file=\.temp/[^/]+/)/', r'\1', markdown)
+                
                 # 返回所有更新的值
                 return [preview, markdown, markdown, page_num, page_num, page_num]
             
@@ -774,6 +809,11 @@ if __name__ == '__main__':
                     margin: 10px auto;
                     border: 1px solid #eee;
                     border-radius: 5px;
+                }
+                /* 确保图片不超出容器 */
+                .prose img {
+                    max-width: 100%;
+                    height: auto;
                 }
                 /* 增强公式显示 */
                 .katex-display {
