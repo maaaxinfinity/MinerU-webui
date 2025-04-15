@@ -138,7 +138,7 @@ def pdf_parse_main(
         # 创建Dataset对象
         from magic_pdf.data.dataset import PymuDocDataset
         ds = PymuDocDataset(pdf_bytes)
-        
+
         # 选择解析方式
         infer_result = None
         pipe = None
@@ -233,7 +233,7 @@ def pdf_parse_main(
     except Exception as e:
         logger.exception(e)
         return [None, None, None, f"处理失败: {str(e)}"]
-
+ 
 
 # 定义一个函数来获取最新的日志信息
 def get_logs():
@@ -317,8 +317,22 @@ def pdf_parse(pdf_path: str, progress=gr.Progress(), is_ocr=False, formula_enabl
         
         # 替换markdown_content的所有图片，增加 /file=相对路径
         if markdown_content:
-            markdown_content = markdown_content.replace("![](", "![](/file=.temp/" + pdf_name+"/")
-            logger.info("处理完成，已替换图片路径")
+            # 改进图片路径替换逻辑，处理更多图片格式和路径情况
+            import re
+            # 1. 处理基本的Markdown图片引用 ![]()
+            markdown_content = markdown_content.replace("![](", f"![](/file=.temp/{pdf_name}/")
+            
+            # 2. 处理包含alt文本的图片引用 ![alt](path)，但避免处理外部链接
+            markdown_content = re.sub(r'!\[(.*?)\]\((?!http|https)([^)]+)\)', 
+                                     r'![\1](/file=.temp/' + pdf_name + r'/\2)', 
+                                     markdown_content)
+            
+            # 3. 处理HTML图片标签
+            markdown_content = re.sub(r'<img\s+src=["\'](?!http|https)([^"\']+)["\']', 
+                                     r'<img src="/file=.temp/' + pdf_name + r'/\1"', 
+                                     markdown_content)
+            
+            logger.info("处理完成，已替换所有图片路径")
         else:
             logger.warning("处理完成，但markdown内容为空")
         
@@ -559,7 +573,9 @@ if __name__ == '__main__':
                                 label="识别结果", 
                                 height=600, 
                                 show_copy_button=True,
-                                line_breaks=True
+                                line_breaks=True,
+                                sanitize_html=False,  # 允许HTML内容，使img标签可以正常渲染
+                                elem_id="markdown-render-output"  # 添加元素ID方便CSS定制
                             )
                         with gr.Tab('Markdown 源码'):
                             # 添加Markdown源码分页控制
@@ -729,7 +745,7 @@ if __name__ == '__main__':
                 inputs=[base_path], 
                 outputs=[download_output]
             )
-            
+
             # 添加清空按钮
             clear_button.add([
                 pdf_input, 
@@ -747,6 +763,27 @@ if __name__ == '__main__':
                 preview_status
             ])
 
+            # 在合适位置添加这段代码，用于为Markdown渲染添加CSS样式
+            demo.load(lambda: gr.HTML("""
+            <style>
+                /* 增强Markdown中图片的显示 */
+                #markdown-render-output img {
+                    max-width: 100%;
+                    height: auto;
+                    display: block;
+                    margin: 10px auto;
+                    border: 1px solid #eee;
+                    border-radius: 5px;
+                }
+                /* 增强公式显示 */
+                .katex-display {
+                    overflow-x: auto;
+                    overflow-y: hidden;
+                    padding: 5px 0;
+                }
+            </style>
+            """), None, None)
+
         except Exception as e:
             logger.exception(f"界面创建出错: {str(e)}")
             gr.HTML(f"<div style='color:red'>应用初始化失败: {str(e)}</div>")
@@ -758,8 +795,9 @@ if __name__ == '__main__':
             server_name='127.0.0.1', 
             server_port=port, 
             share=False, 
-            allowed_paths=[".temp/", "static/"],
-            debug=True
+            allowed_paths=[".temp/", "static/", "examples/"],  # 允许访问.temp和其他目录下的文件
+            debug=True,
+            show_error=True,  # 显示错误信息，帮助调试
         )
     except Exception as e:
         logger.exception(f"Gradio启动失败: {str(e)}")
