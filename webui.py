@@ -244,34 +244,59 @@ def export_zip(base_path):
 
 
 def pdf_parse(pdf_path: str, progress=gr.Progress(), is_ocr=False, formula_enable=True, table_enable=True, language="auto", max_pages=1000):
-    # 确保.temp目录存在
-    temp_dir = os.path.join(os.path.dirname(__file__), ".temp")
-    os.makedirs(temp_dir, exist_ok=True)
-    
-    # 文件迁移到脚本目录的.temp
-    file_name = os.path.basename(pdf_path)
-    pdf_name = file_name.split(".")[0]
-    target_pdf_path = os.path.join(os.path.dirname(__file__), ".temp", file_name)
-    # 复制文件到脚本目录的.temp
-    with open(target_pdf_path, "wb") as f:
-        f.write(open(pdf_path, "rb").read())
-    # 开始解析
-    parse_method = "ocr" if is_ocr else "auto"
-    [markdown_content, file_path, layout_pdf_path, status_msg] = pdf_parse_main(
-        target_pdf_path, 
-        progress, 
-        parse_method=parse_method, 
-        formula_enable=formula_enable, 
-        table_enable=table_enable,
-        language=language,
-        end_pages=max_pages
-    )
-    
-    # 替换markdown_content的所有图片，增加 /file=相对路径
-    if markdown_content:
-        markdown_content = markdown_content.replace("![](", "![](/file=.temp/" + pdf_name+"/")
+    try:
+        # 检查pdf_path是否有效
+        if not pdf_path:
+            logger.error("未选择PDF文件")
+            return [None, None, None, "请先上传PDF文件"]
+            
+        # 确保.temp目录存在
+        temp_dir = os.path.join(os.path.dirname(__file__), ".temp")
+        os.makedirs(temp_dir, exist_ok=True)
         
-    return [markdown_content, file_path, layout_pdf_path, status_msg]
+        # 记录文件信息，用于调试
+        logger.info(f"处理文件: {pdf_path}")
+        
+        # 文件迁移到脚本目录的.temp
+        file_name = os.path.basename(pdf_path)
+        pdf_name = file_name.split(".")[0]
+        target_pdf_path = os.path.join(os.path.dirname(__file__), ".temp", file_name)
+        
+        # 复制文件到脚本目录的.temp
+        try:
+            with open(target_pdf_path, "wb") as f:
+                f.write(open(pdf_path, "rb").read())
+            logger.info(f"文件已复制到: {target_pdf_path}")
+        except Exception as e:
+            logger.exception(f"复制文件失败: {str(e)}")
+            return [None, None, None, f"读取PDF文件失败: {str(e)}"]
+            
+        # 开始解析
+        parse_method = "ocr" if is_ocr else "auto"
+        logger.info(f"开始解析，方法: {parse_method}, 语言: {language}, 最大页数: {max_pages}")
+        
+        [markdown_content, file_path, layout_pdf_path, status_msg] = pdf_parse_main(
+            target_pdf_path, 
+            progress, 
+            parse_method=parse_method, 
+            formula_enable=formula_enable, 
+            table_enable=table_enable,
+            language=language,
+            end_pages=max_pages
+        )
+        
+        # 替换markdown_content的所有图片，增加 /file=相对路径
+        if markdown_content:
+            markdown_content = markdown_content.replace("![](", "![](/file=.temp/" + pdf_name+"/")
+            logger.info("处理完成，已替换图片路径")
+        else:
+            logger.warning("处理完成，但markdown内容为空")
+            
+        return [markdown_content, file_path, layout_pdf_path, status_msg]
+        
+    except Exception as e:
+        logger.exception(f"PDF处理过程中发生错误: {str(e)}")
+        return [None, None, None, f"处理出错: {str(e)}"]
 
 
 def is_port_in_use(port):
@@ -315,6 +340,10 @@ latex_delimiters = [
 
 
 if __name__ == '__main__':
+    # 设置日志输出到文件
+    logger.add("mineru_webui.log", rotation="500 MB", level="DEBUG")
+    logger.info("===== 应用启动 =====")
+    
     port = 7860  # Gradio 默认端口
     
     # 启动打开浏览器的线程
@@ -334,89 +363,138 @@ if __name__ == '__main__':
     with open(header_path, "r", encoding="utf-8") as file:
         header = file.read()
 
-    with gr.Blocks() as demo:
-        # 添加HTML头部
-        gr.HTML(header)
-        
-        with gr.Row():
-            with gr.Column(variant='panel', scale=5):
-                with gr.Tabs():
-                    with gr.Tab('上传文件'):
-                        pdf_input = PDF(label="上传PDF文档", interactive=True)
-                        gr.HTML("<div style='margin-top:10px; margin-bottom:10px; color:#666;'>支持PDF文件格式</div>")
-                    
-                    with gr.Tab('文档案例'):
-                        example_root = os.path.join(os.path.dirname(__file__), 'examples')
-                        if os.path.exists(example_root):
-                            examples = [os.path.join(example_root, f) for f in os.listdir(example_root) if f.endswith('.pdf')]
-                            if examples:
-                                gr.Examples(examples=examples, inputs=pdf_input)
+    with gr.Blocks(analytics_enabled=False, title="Mineru PDF处理") as demo:
+        try:
+            # 添加HTML头部
+            gr.HTML(header)
             
-            with gr.Column(variant='panel', scale=5):
-                # 增加高级设置选项
-                max_pages = gr.Slider(1, 100000, 1000, step=1, label='最大转换页数')
-                with gr.Row():
-                    language = gr.Dropdown(all_lang, label='语言', value='auto')
-                with gr.Row():
-                    formula_enable = gr.Checkbox(label='启用公式识别', value=True)
-                    is_ocr = gr.Checkbox(label='强制启用OCR识别', value=False)
-                    table_enable = gr.Checkbox(label='启用表格识别', value=True)
-                with gr.Row():
-                    extract_button = gr.Button('开始抽取', variant='primary')
-                    export_button = gr.Button('打包下载')
-                    clear_button = gr.ClearButton(value='清空')
-            
-            with gr.Column(variant='panel', scale=5):
-                with gr.Tabs():
-                    download_output = gr.File(label='转换结果压缩包', interactive=False, height=50)
-                    status_output = gr.Textbox(label='处理状态', interactive=False)
-
-        with gr.Row():
-            with gr.Column(variant='panel', scale=5):
-                # 这里显示PDF预览
-                preview_pdf = PDF(label='布局预览', interactive=False, visible=True, height=800)
+            with gr.Row():
+                with gr.Column(variant='panel', scale=5):
+                    with gr.Tabs():
+                        with gr.Tab('上传文件'):
+                            # 尝试直接使用gr.File而不是PDF组件
+                            pdf_input = gr.File(label="上传PDF文档", file_types=[".pdf"], interactive=True)
+                            gr.HTML("<div style='margin-top:10px; margin-bottom:10px; color:#666;'>支持PDF文件格式</div>")
+                            # 添加调试信息显示
+                            pdf_debug = gr.Textbox(label="调试信息", visible=True)
+                        
+                        with gr.Tab('文档案例'):
+                            example_root = os.path.join(os.path.dirname(__file__), 'examples')
+                            if os.path.exists(example_root):
+                                examples = [os.path.join(example_root, f) for f in os.listdir(example_root) if f.endswith('.pdf')]
+                                if examples:
+                                    gr.Examples(examples=examples, inputs=pdf_input)
                 
-            with gr.Column(variant='panel', scale=5):
-                with gr.Tabs():
-                    with gr.Tab('Markdown 渲染'):
-                        markdown_output = gr.Markdown(
-                            label="识别结果", 
-                            height=800, 
-                            show_copy_button=True,
-                            latex_delimiters=latex_delimiters,
-                            line_breaks=True
-                        )
-                    with gr.Tab('Markdown 源码'):
-                        md_text = gr.TextArea(
-                            label="源代码", 
-                            lines=60, 
-                            show_copy_button=True
-                        )
-        
-        # 保存文件地址，用于后期打包
-        base_path = gr.State("")
-        
-        # 绑定事件
-        extract_button.click(
-            pdf_parse, 
-            inputs=[pdf_input, is_ocr, formula_enable, table_enable, language, max_pages], 
-            outputs=[markdown_output, base_path, preview_pdf, status_output]
-        )
-        
-        export_button.click(
-            export_zip, 
-            inputs=[base_path], 
-            outputs=[download_output]
-        )
-        
-        # 将markdown_output添加到md_text用于显示源码
-        markdown_output.change(
-            lambda x: x, 
-            inputs=[markdown_output], 
-            outputs=[md_text]
-        )
-        
-        # 添加清空按钮
-        clear_button.add([pdf_input, markdown_output, md_text, download_output, preview_pdf, status_output])
+                with gr.Column(variant='panel', scale=5):
+                    # 增加高级设置选项
+                    max_pages = gr.Slider(1, 100000, 1000, step=1, label='最大转换页数')
+                    with gr.Row():
+                        language = gr.Dropdown(all_lang, label='语言', value='auto')
+                    with gr.Row():
+                        formula_enable = gr.Checkbox(label='启用公式识别', value=True)
+                        is_ocr = gr.Checkbox(label='强制启用OCR识别', value=False)
+                        table_enable = gr.Checkbox(label='启用表格识别', value=True)
+                    with gr.Row():
+                        extract_button = gr.Button('开始抽取', variant='primary')
+                        export_button = gr.Button('打包下载')
+                        clear_button = gr.ClearButton(value='清空')
+                
+                with gr.Column(variant='panel', scale=5):
+                    with gr.Tabs():
+                        download_output = gr.File(label='转换结果压缩包', interactive=False, height=50)
+                        status_output = gr.Textbox(label='处理状态', interactive=False)
 
-    demo.queue().launch(server_name='127.0.0.1', server_port=port, share=False, allowed_paths=[".temp/", "static/"])
+            with gr.Row():
+                with gr.Column(variant='panel', scale=5):
+                    # 这里显示PDF预览
+                    preview_pdf = PDF(label='布局预览', interactive=False, visible=True, height=800)
+                    
+                with gr.Column(variant='panel', scale=5):
+                    with gr.Tabs():
+                        with gr.Tab('Markdown 渲染'):
+                            markdown_output = gr.Markdown(
+                                label="识别结果", 
+                                height=800, 
+                                show_copy_button=True,
+                                latex_delimiters=latex_delimiters,
+                                line_breaks=True
+                            )
+                        with gr.Tab('Markdown 源码'):
+                            md_text = gr.TextArea(
+                                label="源代码", 
+                                lines=60, 
+                                show_copy_button=True
+                            )
+            
+            # 保存文件地址，用于后期打包
+            base_path = gr.State("")
+            
+            # 添加PDF输入变化的事件处理
+            pdf_input.change(
+                lambda x: f"选择的文件: {x.name if x and hasattr(x, 'name') else '无文件'}", 
+                inputs=[pdf_input], 
+                outputs=[pdf_debug]
+            )
+            
+            # 定义事件处理函数
+            def handle_extract(pdf_file, is_ocr, formula_enable, table_enable, language, max_pages):
+                # 先显示调试信息
+                if pdf_file is None:
+                    logger.warning("未选择文件")
+                    return [None, None, None, "请先上传PDF文件"]
+                
+                # 检查文件是否有效
+                if isinstance(pdf_file, list) and len(pdf_file) > 0:
+                    # 如果传入的是文件列表，取第一个
+                    pdf_path = pdf_file[0].name
+                elif hasattr(pdf_file, 'name'):
+                    # 如果传入的是单个文件对象
+                    pdf_path = pdf_file.name
+                else:
+                    # 如果传入的是字符串路径
+                    pdf_path = pdf_file
+                
+                # 记录当前处理的参数
+                logger.info(f"处理参数: 文件={pdf_path}, OCR={is_ocr}, 公式={formula_enable}, 表格={table_enable}, 语言={language}, 最大页数={max_pages}")
+                # 调用PDF处理函数
+                return pdf_parse(pdf_path, None, is_ocr, formula_enable, table_enable, language, max_pages)
+            
+            # 绑定提取按钮点击事件
+            extract_button.click(
+                handle_extract,
+                inputs=[pdf_input, is_ocr, formula_enable, table_enable, language, max_pages], 
+                outputs=[markdown_output, base_path, preview_pdf, status_output]
+            )
+            
+            export_button.click(
+                export_zip, 
+                inputs=[base_path], 
+                outputs=[download_output]
+            )
+            
+            # 将markdown_output添加到md_text用于显示源码
+            markdown_output.change(
+                lambda x: x, 
+                inputs=[markdown_output], 
+                outputs=[md_text]
+            )
+            
+            # 添加清空按钮
+            clear_button.add([pdf_input, markdown_output, md_text, download_output, preview_pdf, status_output])
+
+        except Exception as e:
+            logger.exception(f"界面创建出错: {str(e)}")
+            gr.HTML(f"<div style='color:red'>应用初始化失败: {str(e)}</div>")
+
+    # 启动Gradio界面
+    logger.info("启动Gradio界面")
+    try:
+        demo.queue().launch(
+            server_name='127.0.0.1', 
+            server_port=port, 
+            share=False, 
+            allowed_paths=[".temp/", "static/"],
+            debug=True
+        )
+    except Exception as e:
+        logger.exception(f"Gradio启动失败: {str(e)}")
