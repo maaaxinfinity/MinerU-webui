@@ -419,4 +419,4 @@ if __name__ == '__main__':
         # 添加清空按钮
         clear_button.add([pdf_input, markdown_output, md_text, download_output, preview_pdf, status_output])
 
-    demo.queue().launch(server_name='127.0.0.1', server_port=port, share=True, allowed_paths=[".temp/", "static/"])
+    demo.queue().launch(server_name='127.0.0.1', server_port=port, share=False, allowed_paths=[".temp/", "static/"])
