@@ -327,12 +327,29 @@ def pdf_parse(pdf_path: str, progress=gr.Progress(), is_ocr=False, formula_enabl
                 preview_dir = os.path.join(temp_dir, "preview")
                 os.makedirs(preview_dir, exist_ok=True)
                 
-                # 将PDF的第一页转换为图片
-                preview_image_path = os.path.join(preview_dir, f"{pdf_name}_layout_preview.png")
-                images = convert_from_path(layout_pdf_path, first_page=1, last_page=1)
-                if images and len(images) > 0:
-                    images[0].save(preview_image_path, 'PNG')
-                    logger.info(f"创建了布局预览图: {preview_image_path}")
+                # 将PDF转换为多页图片
+                preview_image_dir = os.path.join(preview_dir, f"{pdf_name}_layout_preview")
+                os.makedirs(preview_image_dir, exist_ok=True)
+                
+                # 转换所有页面
+                images = convert_from_path(layout_pdf_path)
+                preview_images = []
+                
+                for i, img in enumerate(images):
+                    img_path = os.path.join(preview_image_dir, f"page_{i+1}.png")
+                    img.save(img_path, 'PNG')
+                    preview_images.append(img_path)
+                
+                logger.info(f"创建了布局预览图: {len(preview_images)}页")
+                
+                # 返回第一页作为预览
+                preview_image_path = preview_images[0] if preview_images else None
+                
+                # 将图片路径保存到layout_preview.json
+                preview_json_path = os.path.join(preview_dir, f"{pdf_name}_layout_preview.json")
+                with open(preview_json_path, 'w', encoding='utf-8') as f:
+                    json.dump(preview_images, f, ensure_ascii=False)
+                
             except Exception as e:
                 logger.exception(f"创建布局预览图失败: {str(e)}")
                 preview_image_path = None
@@ -450,12 +467,15 @@ if __name__ == '__main__':
 
             with gr.Row():
                 with gr.Column(variant='default', scale=5):
-                    # 使用图片展示而不是PDF链接
+                    # 使用滑块组件显示布局预览
+                    preview_slider = gr.Slider(minimum=1, maximum=1, step=1, value=1, label="布局预览页数")
                     preview_image = gr.Image(label='布局预览', interactive=False)
                     
                 with gr.Column(variant='default', scale=5):
                     with gr.Tabs():
                         with gr.Tab('Markdown 渲染'):
+                            # 添加Markdown分页控制
+                            markdown_slider = gr.Slider(minimum=1, maximum=1, step=1, value=1, label="Markdown页数")
                             markdown_output = gr.Markdown(
                                 label="识别结果", 
                                 height=600, 
@@ -463,6 +483,8 @@ if __name__ == '__main__':
                                 line_breaks=True
                             )
                         with gr.Tab('Markdown 源码'):
+                            # 添加Markdown源码分页控制
+                            md_source_slider = gr.Slider(minimum=1, maximum=1, step=1, value=1, label="源码页数")
                             md_text = gr.TextArea(
                                 label="源代码", 
                                 lines=40, 
@@ -471,6 +493,10 @@ if __name__ == '__main__':
             
             # 保存文件地址，用于后期打包
             base_path = gr.State("")
+            # 保存Markdown分页内容
+            markdown_pages = gr.State([])
+            # 保存预览图片路径
+            preview_images = gr.State([])
             
             # 添加PDF输入变化的事件处理
             pdf_input.change(
@@ -479,12 +505,43 @@ if __name__ == '__main__':
                 outputs=[pdf_debug]
             )
             
+            # 处理布局预览滑块变化
+            def update_preview(page_num, image_paths):
+                if not image_paths or page_num <= 0 or page_num > len(image_paths):
+                    return None
+                return image_paths[page_num-1]
+            
+            preview_slider.change(
+                update_preview,
+                inputs=[preview_slider, preview_images],
+                outputs=[preview_image]
+            )
+            
+            # 处理Markdown渲染滑块变化
+            def update_markdown(page_num, pages):
+                if not pages or page_num <= 0 or page_num > len(pages):
+                    return ""
+                return pages[page_num-1]
+            
+            markdown_slider.change(
+                update_markdown,
+                inputs=[markdown_slider, markdown_pages],
+                outputs=[markdown_output]
+            )
+            
+            # 处理Markdown源码滑块变化
+            md_source_slider.change(
+                update_markdown,
+                inputs=[md_source_slider, markdown_pages],
+                outputs=[md_text]
+            )
+            
             # 定义事件处理函数
             def handle_extract(pdf_file, is_ocr, formula_enable, table_enable, language, max_pages):
                 # 先显示调试信息
                 if pdf_file is None:
                     logger.warning("未选择文件")
-                    return [None, None, None, "请先上传PDF文件"]
+                    return [None, None, None, "请先上传PDF文件", [], []]
                 
                 # 检查文件是否有效
                 try:
@@ -503,16 +560,53 @@ if __name__ == '__main__':
                     # 调用PDF处理函数，不再传递None作为progress参数
                     [md_content, file_path, preview_image_path, status_msg] = pdf_parse(pdf_path, gr.Progress(), is_ocr, formula_enable, table_enable, language, max_pages)
                     
-                    return [md_content, file_path, preview_image_path, status_msg]
+                    # 获取所有预览图片
+                    preview_images_list = get_preview_images(file_path)
+                    
+                    # 分割Markdown内容为页面
+                    md_pages = split_markdown_to_pages(md_content)
+                    
+                    # 更新滑块最大值
+                    preview_slider_value = gr.Slider(minimum=1, maximum=max(1, len(preview_images_list)), step=1, value=1, label="布局预览页数")
+                    markdown_slider_value = gr.Slider(minimum=1, maximum=max(1, len(md_pages)), step=1, value=1, label="Markdown页数")
+                    md_source_slider_value = gr.Slider(minimum=1, maximum=max(1, len(md_pages)), step=1, value=1, label="源码页数")
+                    
+                    # 返回第一页的预览和Markdown内容
+                    first_preview = preview_image_path
+                    first_markdown = md_pages[0] if md_pages else ""
+                    
+                    return [
+                        first_markdown, 
+                        file_path, 
+                        first_preview, 
+                        status_msg, 
+                        md_pages, 
+                        preview_images_list, 
+                        preview_slider_value, 
+                        markdown_slider_value, 
+                        md_source_slider_value,
+                        first_markdown
+                    ]
                 except Exception as e:
                     logger.exception(f"处理文件出错: {str(e)}")
-                    return [None, None, None, f"处理文件出错: {str(e)}"]
+                    return [None, None, None, f"处理文件出错: {str(e)}", [], [], gr.Slider(1), gr.Slider(1), gr.Slider(1), None]
             
             # 绑定提取按钮点击事件
             extract_button.click(
                 handle_extract,
                 inputs=[pdf_input, is_ocr, formula_enable, table_enable, language, max_pages], 
-                outputs=[markdown_output, base_path, preview_image, status_output]
+                outputs=[
+                    markdown_output, 
+                    base_path, 
+                    preview_image, 
+                    status_output, 
+                    markdown_pages, 
+                    preview_images, 
+                    preview_slider,
+                    markdown_slider,
+                    md_source_slider,
+                    md_text
+                ]
             )
             
             export_button.click(
@@ -521,15 +615,21 @@ if __name__ == '__main__':
                 outputs=[download_output]
             )
             
-            # 将markdown_output添加到md_text用于显示源码
-            markdown_output.change(
-                lambda x: x if x else "", 
-                inputs=[markdown_output], 
-                outputs=[md_text]
-            )
-            
             # 添加清空按钮
-            clear_button.add([pdf_input, markdown_output, md_text, download_output, preview_image, status_output, pdf_debug])
+            clear_button.add([
+                pdf_input, 
+                markdown_output, 
+                md_text, 
+                download_output, 
+                preview_image, 
+                status_output, 
+                pdf_debug, 
+                markdown_pages, 
+                preview_images,
+                preview_slider,
+                markdown_slider,
+                md_source_slider
+            ])
 
         except Exception as e:
             logger.exception(f"界面创建出错: {str(e)}")
@@ -547,3 +647,76 @@ if __name__ == '__main__':
         )
     except Exception as e:
         logger.exception(f"Gradio启动失败: {str(e)}")
+
+# 添加这两个新函数，用于处理多页显示
+def get_preview_images(file_path):
+    if not file_path or not os.path.exists(file_path):
+        return []
+    
+    pdf_name = os.path.basename(file_path).split(".")[0]
+    temp_dir = os.path.join(os.path.dirname(__file__), ".temp")
+    preview_dir = os.path.join(temp_dir, "preview")
+    preview_json_path = os.path.join(preview_dir, f"{pdf_name}_layout_preview.json")
+    
+    if os.path.exists(preview_json_path):
+        try:
+            with open(preview_json_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            logger.exception(f"读取预览图JSON失败: {str(e)}")
+    
+    return []
+
+def split_markdown_to_pages(markdown_text, page_size=1000):
+    if not markdown_text:
+        return []
+    
+    # 按照标题分割
+    import re
+    sections = re.split(r'(^#{1,6}\s.+$)', markdown_text, flags=re.MULTILINE)
+    
+    # 合并标题和内容
+    pages = []
+    current_page = ""
+    current_size = 0
+    
+    for i in range(len(sections)):
+        section = sections[i]
+        if not section.strip():
+            continue
+            
+        # 如果是标题
+        if re.match(r'^#{1,6}\s.+$', section, flags=re.MULTILINE):
+            # 如果当前页已经达到一定大小，开始新页
+            if current_size >= page_size and current_page:
+                pages.append(current_page)
+                current_page = section
+                current_size = len(section)
+            else:
+                current_page += section
+                current_size += len(section)
+                
+            # 如果有下一节的内容，添加它
+            if i + 1 < len(sections):
+                current_page += sections[i+1]
+                current_size += len(sections[i+1])
+        # 如果不是标题且没有被前面处理过
+        elif i > 0 and not re.match(r'^#{1,6}\s.+$', sections[i-1], flags=re.MULTILINE):
+            current_page += section
+            current_size += len(section)
+            
+            # 如果页面太大，拆分
+            if current_size >= page_size * 2:
+                pages.append(current_page)
+                current_page = ""
+                current_size = 0
+    
+    # 添加最后一页
+    if current_page:
+        pages.append(current_page)
+        
+    # 如果没有页面，将整个文档作为一页
+    if not pages and markdown_text:
+        pages.append(markdown_text)
+        
+    return pages
