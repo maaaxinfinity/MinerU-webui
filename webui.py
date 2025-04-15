@@ -514,11 +514,131 @@ def split_markdown_to_pages(markdown_text, page_size=1000):
         
     return pages
 
+def convert_image_paths_for_gradio(markdown_content):
+    """转换Markdown中的图片路径使其能在Gradio中正确显示"""
+    if not markdown_content:
+        return ""
+    
+    import re
+    import os
+    
+    # 函数：检查图片文件是否存在并记录日志
+    def check_image_exists(path):
+        full_path = os.path.join(os.path.dirname(__file__), path.lstrip('./'))
+        exists = os.path.exists(full_path)
+        if exists:
+            logger.info(f"图片文件存在: {full_path}")
+        else:
+            logger.warning(f"图片文件不存在: {full_path}")
+        return exists
+    
+    # 1. 对于/file=.temp/格式的路径进行修复
+    # 转换 /file=.temp/xxx/images/yyy.jpg 为 ./temp/xxx/images/yyy.jpg
+    def replace_file_path(match):
+        path = match.group(1)
+        new_path = f"./temp/{path}"
+        check_image_exists(new_path)
+        return new_path
+    
+    # 处理图片路径格式1: ![xxx](/file=.temp/...)
+    markdown_content = re.sub(
+        r'!\[.*?\]\(/file=\.temp/([^)]+)\)', 
+        lambda m: f'![](./temp/{m.group(1)})', 
+        markdown_content
+    )
+    
+    # 处理图片路径格式2: <img src="/file=.temp/...">
+    markdown_content = re.sub(
+        r'<img\s+src=["\']?/file=\.temp/([^"\'\s>]+)["\']?', 
+        lambda m: f'<img src="./temp/{m.group(1)}"', 
+        markdown_content
+    )
+    
+    # 输出处理后的部分内容用于调试
+    logger.info(f"处理后的markdown部分内容: {markdown_content[:200] if len(markdown_content) > 200 else markdown_content}")
+    
+    return markdown_content
+
+# 添加调试辅助函数
+def debug_image_paths():
+    """一个调试函数，帮助检查图片路径问题"""
+    temp_dir = os.path.join(os.path.dirname(__file__), "temp")
+    if not os.path.exists(temp_dir):
+        logger.warning(f"temp目录不存在: {temp_dir}")
+        # 尝试创建符号链接
+        try:
+            dot_temp_dir = os.path.join(os.path.dirname(__file__), ".temp")
+            if os.path.exists(dot_temp_dir):
+                # 在Windows上创建目录连接
+                if platform.system() == "Windows":
+                    import subprocess
+                    subprocess.run(f'mklink /D "{temp_dir}" "{dot_temp_dir}"', shell=True)
+                else:
+                    # 在Linux/Mac上创建符号链接
+                    os.symlink(dot_temp_dir, temp_dir)
+                logger.info(f"创建了.temp目录的符号链接到temp目录")
+            else:
+                logger.warning(f".temp目录也不存在: {dot_temp_dir}")
+        except Exception as e:
+            logger.exception(f"创建符号链接失败: {e}")
+    else:
+        logger.info(f"temp目录存在: {temp_dir}")
+        # 列出子目录
+        for item in os.listdir(temp_dir):
+            logger.info(f" - {item}")
 
 if __name__ == '__main__':
     # 设置日志输出到文件
     logger.add("mineru_webui.log", rotation="500 MB", level="DEBUG")
     logger.info("===== 应用启动 =====")
+    
+    # 确保目录结构存在
+    base_dir = os.path.dirname(__file__)
+    
+    # 确保.temp目录存在
+    dot_temp_dir = os.path.join(base_dir, ".temp")
+    os.makedirs(dot_temp_dir, exist_ok=True)
+    logger.info(f"确保.temp目录存在: {dot_temp_dir}")
+    
+    # 确保temp目录存在(用于URL路径引用)
+    temp_dir = os.path.join(base_dir, "temp")
+    if not os.path.exists(temp_dir):
+        try:
+            # 创建目录
+            os.makedirs(temp_dir, exist_ok=True)
+            logger.info(f"创建temp目录: {temp_dir}")
+            
+            # 确保temp目录中包含.temp的所有内容
+            if os.path.exists(dot_temp_dir):
+                # 获取.temp中的所有子项
+                for item in os.listdir(dot_temp_dir):
+                    source = os.path.join(dot_temp_dir, item)
+                    target = os.path.join(temp_dir, item)
+                    
+                    # 如果已存在则跳过
+                    if os.path.exists(target):
+                        continue
+                    
+                    # 在不同操作系统上创建链接
+                    if os.path.isdir(source):
+                        # 对于目录
+                        if platform.system() == "Windows":
+                            os.system(f'mklink /D "{target}" "{source}"')
+                        else:
+                            os.symlink(source, target)
+                        logger.info(f"为目录创建链接: {source} -> {target}")
+                    else:
+                        # 对于文件
+                        if platform.system() == "Windows":
+                            os.system(f'mklink "{target}" "{source}"')
+                        else:
+                            os.symlink(source, target)
+                        logger.info(f"为文件创建链接: {source} -> {target}")
+        except Exception as e:
+            logger.exception(f"创建temp目录或链接失败: {e}")
+    
+    # 调用调试辅助函数
+    debug_image_paths()
     
     port = 7860  # Gradio 默认端口
     
@@ -636,7 +756,7 @@ if __name__ == '__main__':
                     return ""
                 return pages[page_num-1]
             
-            # 添加新函数：同步所有滑块
+            # 修改sync_all_sliders函数，使用新的图片路径转换助手
             def sync_all_sliders(page_num, preview_images, markdown_pages):
                 """同步所有滑块到相同的页码"""
                 # 确保页码在有效范围内
@@ -656,16 +776,9 @@ if __name__ == '__main__':
                 preview = update_preview(page_num, preview_images)
                 markdown = update_markdown(page_num, markdown_pages)
                 
-                # 修复markdown中可能存在的图片路径问题
+                # 使用新的图片路径转换助手
                 if markdown:
-                    import re
-                    # 修复双重路径问题
-                    double_path_pattern = r'/file=\.temp/([^/]+)//file=\.temp/([^/]+)/'
-                    if re.search(double_path_pattern, markdown):
-                        markdown = re.sub(double_path_pattern, r'/file=.temp/\1/', markdown)
-                    
-                    # 修复双斜杠问题
-                    markdown = re.sub(r'(/file=\.temp/[^/]+/)/', r'\1', markdown)
+                    markdown = convert_image_paths_for_gradio(markdown)
                 
                 # 返回所有更新的值
                 return [preview, markdown, markdown, page_num, page_num, page_num]
@@ -729,24 +842,27 @@ if __name__ == '__main__':
                     # 获取所有预览图片
                     preview_images_list = get_preview_images(file_path)
                     
-                    # 分割Markdown内容为页面
+                    # 分割Markdown内容为页面，并处理每一页的图片路径
                     md_pages = split_markdown_to_pages(md_content)
+                    processed_md_pages = []
+                    for page in md_pages:
+                        processed_md_pages.append(convert_image_paths_for_gradio(page))
                     
                     # 更新滑块最大值
                     preview_slider_value = gr.Slider(minimum=1, maximum=max(1, len(preview_images_list)), step=1, value=1, label="布局预览页数")
-                    markdown_slider_value = gr.Slider(minimum=1, maximum=max(1, len(md_pages)), step=1, value=1, label="Markdown页数")
-                    md_source_slider_value = gr.Slider(minimum=1, maximum=max(1, len(md_pages)), step=1, value=1, label="源码页数")
+                    markdown_slider_value = gr.Slider(minimum=1, maximum=max(1, len(processed_md_pages)), step=1, value=1, label="Markdown页数")
+                    md_source_slider_value = gr.Slider(minimum=1, maximum=max(1, len(processed_md_pages)), step=1, value=1, label="源码页数")
                     
                     # 返回第一页的预览和Markdown内容
                     first_preview = preview_image_path
-                    first_markdown = md_pages[0] if md_pages else ""
+                    first_markdown = processed_md_pages[0] if processed_md_pages else ""
                     
                     return [
                         first_markdown, 
                         file_path, 
                         first_preview, 
                         status_msg, 
-                        md_pages, 
+                        processed_md_pages,  # 注意这里变成了处理后的页面集合
                         preview_images_list, 
                         preview_slider_value, 
                         markdown_slider_value, 
@@ -798,14 +914,14 @@ if __name__ == '__main__':
                 preview_status
             ])
 
-            # 在合适位置添加这段代码，用于为Markdown渲染添加CSS样式
-            demo.load(lambda: gr.HTML("""
+            # 在页面加载时添加额外的HTML和CSS增强
+            html_head = gr.HTML("""
             <style>
                 /* 增强Markdown中图片的显示 */
                 #markdown-render-output img {
                     max-width: 100%;
                     height: auto;
-                    display: block;
+                    display: block !important;
                     margin: 10px auto;
                     border: 1px solid #eee;
                     border-radius: 5px;
@@ -821,8 +937,49 @@ if __name__ == '__main__':
                     overflow-y: hidden;
                     padding: 5px 0;
                 }
+                /* 修复Gradio Markdown渲染器中的图片显示问题 */
+                .gradio-markdown img {
+                    display: block !important;
+                    max-width: 100%;
+                }
+                /* 允许各种图片容器能正确显示图片 */
+                .markdown-body img,
+                .md-container img {
+                    max-width: 100% !important;
+                    display: block !important;
+                }
+                
+                /* 强制所有图片可见 */
+                img {
+                    visibility: visible !important;
+                    display: block !important;
+                    opacity: 1 !important;
+                }
             </style>
-            """), None, None)
+
+            <script>
+                // 添加JavaScript以增强图片渲染
+                document.addEventListener('DOMContentLoaded', function() {
+                    // 定期检查并确保图片是可见的
+                    setInterval(function() {
+                        document.querySelectorAll('img').forEach(function(img) {
+                            img.style.display = 'block';
+                            img.style.visibility = 'visible';
+                            img.style.opacity = '1';
+                            
+                            // 如果src包含/file=前缀，尝试修复
+                            if (img.src && img.src.includes('/file=')) {
+                                let newSrc = img.src.replace('/file=', './');
+                                console.log('Fixed image path:', img.src, '->', newSrc);
+                                img.src = newSrc;
+                            }
+                        });
+                    }, 1000);
+                });
+            </script>
+            """)
+            # 使用正确的方式加载样式和脚本，不返回任何内容
+            demo.load(lambda: None)
 
         except Exception as e:
             logger.exception(f"界面创建出错: {str(e)}")
@@ -835,7 +992,7 @@ if __name__ == '__main__':
             server_name='127.0.0.1', 
             server_port=port, 
             share=False, 
-            allowed_paths=[".temp/", "static/", "examples/"],  # 允许访问.temp和其他目录下的文件
+            allowed_paths=[".", ".temp", "static", "examples", "/"],  # 允许访问所有相关目录
             debug=True,
             show_error=True,  # 显示错误信息，帮助调试
         )
