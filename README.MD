@@ -1,38 +1,24 @@
 # MinerU WebUI
 
-MinerU WebUI是一个基于Gradio的图形用户界面，用于MinerU项目的PDF处理和识别功能。
+MinerU WebUI是一个基于Gradio的图形用户界面，用于PDF文档的智能解析和内容提取。它封装了MinerU项目的PDF处理和识别功能，提供简单易用的操作界面。
 
-## 项目更新说明
+Fork自原项目 https://github.com/liuhuapiaoyuan/MinerU-webui
 
-**重要更新**: 本代码已适配最新版MinerU API结构。如果您遇到以下错误：
+## 功能特点
 
-```
-ImportError: cannot import name 'DiskReaderWriter' from 'magic_pdf.data.data_reader_writer'
-```
+- 界面友好：基于Gradio构建的直观Web界面
+- PDF智能解析：支持文本、表格、图片、公式等内容提取
+- 多种解析模式：支持自动、文本和OCR三种解析模式
+- 丰富语言支持：支持多种语言识别，包括中文、英文等
+- 分页浏览：支持布局预览和Markdown内容的分页显示
+- 结果导出：支持一键打包下载解析结果
 
-请确保使用最新版代码，我们已经修复了此问题。
-
-## 特性
-
-- 简单易用的Web界面
-- 支持PDF文档上传和处理
-- 多种解析模式：自动、文本和OCR
-- 结果展示和导出功能
-
-## 安装
+## 安装说明
 
 ### 1. 安装MinerU项目
 
-首先必须安装MinerU项目。请按照以下步骤操作：
-
-```bash
-# 克隆MinerU仓库（如果还没有）
-git clone https://github.com/your-repo/MinerU.git
-
-# 进入MinerU目录并安装
-cd MinerU
-pip install -e .
-```
+首先必须安装MinerU项目。请访问MinerU的官方仓库下载模型：
+https://github.com/opendatalab/MinerU
 
 ### 2. 安装WebUI
 
@@ -44,9 +30,18 @@ git clone https://github.com/your-repo/MinerU-webui.git
 cd MinerU-webui
 pip install -r requirements.txt
 
-# 创建临时目录（用于存储上传的文件）
+# 创建必要的目录
 mkdir -p .temp
 ```
+
+确保拷贝magic-pdf.json配置文件到用户目录：
+
+```bash
+cp ~/magic-pdf.json ./
+```
+
+然后编辑配置文件，设置正确的模型目录路径。
+
 
 ## 使用方法
 
@@ -61,9 +56,15 @@ python webui.py
 ### 使用步骤
 
 1. 在界面上传PDF文件
-2. 点击"开始抽取"按钮
-3. 等待处理完成，查看抽取结果
-4. 如需下载处理后的文件，点击"打包下载"按钮
+2. 选择适当的解析参数：
+   - 语言：选择PDF文档的主要语言（默认为自动检测）
+   - 最大转换页数：限制处理页数
+   - 其他选项：公式识别、表格识别、OCR识别等
+3. 点击"开始抽取"按钮
+4. 等待处理完成，查看抽取结果
+   - 可使用滑块在布局预览中查看不同页面
+   - 可使用滑块在Markdown渲染和源码标签页中查看不同部分
+5. 如需下载处理后的文件，点击"打包下载"按钮
 
 ## API服务
 
@@ -85,168 +86,79 @@ API服务默认运行在http://127.0.0.1:8080，提供以下接口：
 
 ### 常见错误
 
-1. **导入错误**:
-
-   - `ImportError: No module named 'magic_pdf.pipe'`
-   - `ImportError: cannot import name 'DiskReaderWriter'`
-
-   **解决方案**: 这是因为MinerU项目API结构更新导致的，确保使用最新版本的WebUI代码。
+1. **PDF2Image相关错误**:
+   
+   如果遇到与pdf2image相关的错误，请确保正确安装了Poppler
+   
+   - Windows用户确保将Poppler的bin目录添加到PATH
+   - Linux/Mac用户确保安装了poppler-utils
 
 2. **模型初始化错误**:
    
-   确保按照MinerU项目的指南正确下载和配置模型文件。
+   确保按照MinerU项目的指南正确下载和配置模型文件，并在magic-pdf.json中正确设置路径。
 
-## 更新记录
+3. **目录不存在错误**:
 
-- 2023-07-01: 初始版本
-- 2023-12-01: 适配最新MinerU API结构，修复了导入路径问题
-- 2024-06-01: 修复DiskReaderWriter导入错误，全面更新代码适配新版API
+   如果遇到以下错误：
+   ```
+   FileNotFoundError: [Errno 2] No such file or directory: '/path/to/.temp/your_file.pdf'
+   ```
+   
+   请确保创建了`.temp`目录：
+   ```bash
+   mkdir -p .temp
+   ```
 
-## 注意事项
+## GPU加速
 
-- 本项目需要依赖MinerU项目，确保已正确安装
-- 处理大型PDF文件可能需要较长时间和较大内存
-- 本WebUI主要针对中文PDF设计，其他语言的支持可能有限
+如果您的显卡显存大于等于8G，可以启用CUDA加速：
 
-<div align="center" xmlns="http://www.w3.org/1999/html">
-<!-- logo -->
-<p align="center">
-  <img src="doc/mineru.png" width="300px" style="vertical-align:middle;">
-</p> 
-<!-- hot link --> 
-<p align="center">
-<a href="https://github.com/opendatalab/PDF-Extract-Kit">PDF-Extract-Kit: High-Quality PDF Extraction Toolkit</a>🔥🔥🔥
-</p>
-</div>
+1. 覆盖安装支持CUDA的PyTorch：
+   ```bash
+   pip install --force-reinstall torch==2.3.1 torchvision==0.18.1 --index-url https://download.pytorch.org/whl/cu118
+   ```
+
+2. 修改用户目录中的magic-pdf.json配置文件：
+   ```json
+   {
+     "device-mode":"cuda"
+   }
+   ```
 
 ## 项目简介
+
 MinerU是一款开源的高质量PDF解析工具，基于深度学习技术，可自动提取PDF文档中的文字、表格、图片、公式等内容，并提供丰富的分析、统计、搜索等功能。
 本项目为其提供一个简化版本的WebUI，方便用户上传PDF文件，并实时展示提取结果。
 
 ![页面截图](doc/preview.png)
 
+## 推荐 `MinerU-PDFScanner`
 
-## 🚀推荐 `MinerU-PDFScanner` 🌟
-欢迎大家使用配套的新程序`MinerU-PDFScanner`, 可以将本程序作为后端调用，支持多任务并行处理，支持历史数据查看，支持导出包
+欢迎大家使用配套的新程序`MinerU-PDFScanner`, 可以将本程序作为后端调用，支持多任务并行处理，支持历史数据查看，支持导出包：
 
 <div align="center" xmlns="http://www.w3.org/1999/html">
-<!-- logo -->
 <p align="center">
   <img src="doc/mineru.png" width="300px" style="vertical-align:middle;">
 </p> 
-<!-- hot link --> 
 <p align="center">
-👏👏👏👏👏👏<a href="https://liuhuapiaoyuan.github.io/MinerU-PDFScanner/">MinerU-PDFScanner</a>🔥🔥🔥
+<a href="https://liuhuapiaoyuan.github.io/MinerU-PDFScanner/">MinerU-PDFScanner</a>
 </p>
 </div>
 
-
 ![页面截图](doc/image.png)
 
-## 说明：有条件的，用`gpu`加速，提升OCR解析速度
-1. 卸载 `pip uninstall paddlepaddle`
-2. 安装cuda版本对应的paddle 
-
 ## 更新日志
-### 2024.10.11
-- 支持API接口 👏👏👏👏
-- 接口支持异步处理，并发处理🔥🔥🔥🔥
-- 接口文档`http://127.0.0.1:8080/docs#/`
 
-## 1. 第一次运行前的配置
-在仓库根目录可以获得 [magic-pdf.template.json](doc/magic-pdf.template.json) 配置模版文件
-> ❗️务必执行以下命令将配置文件拷贝到【用户目录】下，否则程序将无法运行
->  
-> windows用户目录为 "C:\Users\用户名"
-```powershell
-(New-Object System.Net.WebClient).DownloadFile('https://gitee.com/myhloli/MinerU/raw/master/magic-pdf.template.json', 'magic-pdf.template.json')
-cp magic-pdf.template.json ~/magic-pdf.json
-```
-
-在用户目录中找到magic-pdf.json文件并配置"models-dir"为[5. 下载模型](#5-下载模型)中下载的模型权重文件所在目录
-> ❗️务必正确配置模型权重文件所在目录的【绝对路径】，否则会因为找不到模型文件而导致程序无法运行
-> 
-> windows系统中此路径应包含盘符，且需把路径中所有的`"\"`替换为`"/"`,否则会因为转义原因导致json文件语法错误。
-> 
-> 例如：模型放在D盘根目录的models目录，则model-dir的值应为"D:/models"
-```json
-{
-  "models-dir": "/tmp/models"
-}
-```
+- 2024.04.15: 添加布局预览和Markdown内容的分页功能(Fork)
+- 2024.xx.xx: 修复进度条处理问题
+- 2024.10.11: 
+  - 支持API接口
+  - 接口支持异步处理，并发处理
+  - 接口文档`http://127.0.0.1:8080/docs#/`
 
 
-## 2. 测试CUDA加速
-如果您的显卡显存大于等于8G，可以进行以下流程，测试CUDA解析加速效果
+## 相关项目
 
-**1.覆盖安装支持cuda的torch和torchvision**
-```bash
-pip install --force-reinstall torch==2.3.1 torchvision==0.18.1 --index-url https://download.pytorch.org/whl/cu118
-```
-> ❗️务必在命令中指定以下版本
-> ```bash
-> torch==2.3.1 torchvision==0.18.1 
-> ```
-> 这是我们支持的最高版本，如果不指定版本会自动安装更高版本导致程序无法运行
-
-**2.修改【用户目录】中配置文件magic-pdf.json中"device-mode"的值**
-```json
-{
-  "device-mode":"cuda"
-}
-```
-
-> 提示：CUDA加速是否生效可以根据log中输出的各个阶段cost耗时来简单判断，通常情况下，`layout detection cost` 和 `mfr time` 应提速10倍以上。
-
-
-## 案例PDF可以选择 `examples/small_ocr.pdf`
-
-## 如何下载模型权重文件
-
-详细参考 [如何下载模型文件](https://github.com/opendatalab/MinerU/blob/master/docs/how_to_download_models_zh_cn.md)
-> ❗️模型下载后请务必检查模型文件是否下载完整
-> 
-> 请检查目录下的模型文件大小与网页上描述是否一致，如果可以的话，最好通过sha256校验模型是否下载完整
-> 下载完成后，建议放入目录`models`，并且修改配置文件`magic-pdf.json`中的`models-dir`为模型文件所在目录的绝对路径。
-
-## 启动项目
-```bash
-conda create -n MinerU python=3.10
-conda activate MinerU
-pip install -U magic-pdf[full] --extra-index-url https://wheels.myhloli.com -i https://pypi.tuna.tsinghua.edu.cn/simple
-pip install -r requirements.txt
-python webui.py
-```
-
-> 启动成功后，浏览器打开 http://localhost:7860/ 即可访问项目主页。
-
-## TODO：
-- [ ] 支持进度查看
-- [ ] 支持多文件上传，批处理
-
-## 常见问题
-
-### 文件上传失败：目录不存在错误
-
-如果遇到以下错误：
-```
-FileNotFoundError: [Errno 2] No such file or directory: '/path/to/.temp/your_file.pdf'
-```
-
-这是因为程序无法找到`.temp`目录。解决方法：
-
-1. 确保在MinerU-webui目录下创建了`.temp`目录：
-```bash
-mkdir -p .temp
-```
-
-2. 如果使用的是最新版代码，程序会自动创建此目录，无需手动创建
-
-### 使用API服务时的目录问题
-
-如果使用API服务，确保`uploads`目录也存在：
-```bash
-mkdir -p uploads
-```
-
-最新版的代码已经处理了目录自动创建的问题。
+<p align="center">
+<a href="https://github.com/opendatalab/PDF-Extract-Kit">PDF-Extract-Kit: High-Quality PDF Extraction Toolkit</a>
+</p>
