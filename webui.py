@@ -400,6 +400,79 @@ latex_delimiters = [
     {'left': '$', 'right': '$', 'display': False}
 ]
 
+# 添加这两个新函数，用于处理多页显示
+def get_preview_images(file_path):
+    if not file_path or not os.path.exists(file_path):
+        return []
+    
+    pdf_name = os.path.basename(file_path).split(".")[0]
+    temp_dir = os.path.join(os.path.dirname(__file__), ".temp")
+    preview_dir = os.path.join(temp_dir, "preview")
+    preview_json_path = os.path.join(preview_dir, f"{pdf_name}_layout_preview.json")
+    
+    if os.path.exists(preview_json_path):
+        try:
+            with open(preview_json_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            logger.exception(f"读取预览图JSON失败: {str(e)}")
+    
+    return []
+
+def split_markdown_to_pages(markdown_text, page_size=1000):
+    if not markdown_text:
+        return []
+    
+    # 按照标题分割
+    import re
+    sections = re.split(r'(^#{1,6}\s.+$)', markdown_text, flags=re.MULTILINE)
+    
+    # 合并标题和内容
+    pages = []
+    current_page = ""
+    current_size = 0
+    
+    for i in range(len(sections)):
+        section = sections[i]
+        if not section.strip():
+            continue
+            
+        # 如果是标题
+        if re.match(r'^#{1,6}\s.+$', section, flags=re.MULTILINE):
+            # 如果当前页已经达到一定大小，开始新页
+            if current_size >= page_size and current_page:
+                pages.append(current_page)
+                current_page = section
+                current_size = len(section)
+            else:
+                current_page += section
+                current_size += len(section)
+                
+            # 如果有下一节的内容，添加它
+            if i + 1 < len(sections):
+                current_page += sections[i+1]
+                current_size += len(sections[i+1])
+        # 如果不是标题且没有被前面处理过
+        elif i > 0 and not re.match(r'^#{1,6}\s.+$', sections[i-1], flags=re.MULTILINE):
+            current_page += section
+            current_size += len(section)
+            
+            # 如果页面太大，拆分
+            if current_size >= page_size * 2:
+                pages.append(current_page)
+                current_page = ""
+                current_size = 0
+    
+    # 添加最后一页
+    if current_page:
+        pages.append(current_page)
+        
+    # 如果没有页面，将整个文档作为一页
+    if not pages and markdown_text:
+        pages.append(markdown_text)
+        
+    return pages
+
 
 if __name__ == '__main__':
     # 设置日志输出到文件
@@ -647,76 +720,3 @@ if __name__ == '__main__':
         )
     except Exception as e:
         logger.exception(f"Gradio启动失败: {str(e)}")
-
-# 添加这两个新函数，用于处理多页显示
-def get_preview_images(file_path):
-    if not file_path or not os.path.exists(file_path):
-        return []
-    
-    pdf_name = os.path.basename(file_path).split(".")[0]
-    temp_dir = os.path.join(os.path.dirname(__file__), ".temp")
-    preview_dir = os.path.join(temp_dir, "preview")
-    preview_json_path = os.path.join(preview_dir, f"{pdf_name}_layout_preview.json")
-    
-    if os.path.exists(preview_json_path):
-        try:
-            with open(preview_json_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception as e:
-            logger.exception(f"读取预览图JSON失败: {str(e)}")
-    
-    return []
-
-def split_markdown_to_pages(markdown_text, page_size=1000):
-    if not markdown_text:
-        return []
-    
-    # 按照标题分割
-    import re
-    sections = re.split(r'(^#{1,6}\s.+$)', markdown_text, flags=re.MULTILINE)
-    
-    # 合并标题和内容
-    pages = []
-    current_page = ""
-    current_size = 0
-    
-    for i in range(len(sections)):
-        section = sections[i]
-        if not section.strip():
-            continue
-            
-        # 如果是标题
-        if re.match(r'^#{1,6}\s.+$', section, flags=re.MULTILINE):
-            # 如果当前页已经达到一定大小，开始新页
-            if current_size >= page_size and current_page:
-                pages.append(current_page)
-                current_page = section
-                current_size = len(section)
-            else:
-                current_page += section
-                current_size += len(section)
-                
-            # 如果有下一节的内容，添加它
-            if i + 1 < len(sections):
-                current_page += sections[i+1]
-                current_size += len(sections[i+1])
-        # 如果不是标题且没有被前面处理过
-        elif i > 0 and not re.match(r'^#{1,6}\s.+$', sections[i-1], flags=re.MULTILINE):
-            current_page += section
-            current_size += len(section)
-            
-            # 如果页面太大，拆分
-            if current_size >= page_size * 2:
-                pages.append(current_page)
-                current_page = ""
-                current_size = 0
-    
-    # 添加最后一页
-    if current_page:
-        pages.append(current_page)
-        
-    # 如果没有页面，将整个文档作为一页
-    if not pages and markdown_text:
-        pages.append(markdown_text)
-        
-    return pages
