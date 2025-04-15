@@ -5,3 +5,5 @@ gradio_pdf
 fastapi
 uvicorn
 magic-pdf[full]
+loguru
+tqdm
