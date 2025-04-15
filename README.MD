@@ -1,4 +1,112 @@
+# MinerU WebUI
 
+MinerU WebUI是一个基于Gradio的图形用户界面，用于MinerU项目的PDF处理和识别功能。
+
+## 项目更新说明
+
+**重要更新**: 本代码已适配最新版MinerU API结构。如果您遇到以下错误：
+
+```
+ImportError: cannot import name 'DiskReaderWriter' from 'magic_pdf.data.data_reader_writer'
+```
+
+请确保使用最新版代码，我们已经修复了此问题。
+
+## 特性
+
+- 简单易用的Web界面
+- 支持PDF文档上传和处理
+- 多种解析模式：自动、文本和OCR
+- 结果展示和导出功能
+
+## 安装
+
+### 1. 安装MinerU项目
+
+首先必须安装MinerU项目。请按照以下步骤操作：
+
+```bash
+# 克隆MinerU仓库（如果还没有）
+git clone https://github.com/your-repo/MinerU.git
+
+# 进入MinerU目录并安装
+cd MinerU
+pip install -e .
+```
+
+### 2. 安装WebUI
+
+```bash
+# 克隆WebUI仓库
+git clone https://github.com/your-repo/MinerU-webui.git
+
+# 进入WebUI目录并安装依赖
+cd MinerU-webui
+pip install -r requirements.txt
+
+# 创建临时目录（用于存储上传的文件）
+mkdir -p .temp
+```
+
+## 使用方法
+
+启动WebUI：
+
+```bash
+python webui.py
+```
+
+然后在浏览器中打开显示的链接（默认为 http://127.0.0.1:7860）
+
+### 使用步骤
+
+1. 在界面上传PDF文件
+2. 点击"开始抽取"按钮
+3. 等待处理完成，查看抽取结果
+4. 如需下载处理后的文件，点击"打包下载"按钮
+
+## API服务
+
+本项目还提供了API服务，可以通过以下命令启动：
+
+```bash
+python api.py
+```
+
+API服务默认运行在http://127.0.0.1:8080，提供以下接口：
+
+- `POST /`: 上传PDF文件并创建解析任务
+- `GET /task/{task_id}`: 查询任务状态
+- `GET /pack/{task_id}`: 打包下载解析结果
+
+详细API文档可访问: http://127.0.0.1:8080/docs
+
+## 排错指南
+
+### 常见错误
+
+1. **导入错误**:
+
+   - `ImportError: No module named 'magic_pdf.pipe'`
+   - `ImportError: cannot import name 'DiskReaderWriter'`
+
+   **解决方案**: 这是因为MinerU项目API结构更新导致的，确保使用最新版本的WebUI代码。
+
+2. **模型初始化错误**:
+   
+   确保按照MinerU项目的指南正确下载和配置模型文件。
+
+## 更新记录
+
+- 2023-07-01: 初始版本
+- 2023-12-01: 适配最新MinerU API结构，修复了导入路径问题
+- 2024-06-01: 修复DiskReaderWriter导入错误，全面更新代码适配新版API
+
+## 注意事项
+
+- 本项目需要依赖MinerU项目，确保已正确安装
+- 处理大型PDF文件可能需要较长时间和较大内存
+- 本WebUI主要针对中文PDF设计，其他语言的支持可能有限
 
 <div align="center" xmlns="http://www.w3.org/1999/html">
 <!-- logo -->

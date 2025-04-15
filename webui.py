@@ -9,7 +9,7 @@ from loguru import logger
 from magic_pdf.data.dataset import Dataset
 from magic_pdf.operators.models import InferenceResult
 from magic_pdf.operators.pipes import PipeResult
-from magic_pdf.data.data_reader_writer import DiskReaderWriter, DataWriter, FileBasedDataWriter
+from magic_pdf.data.data_reader_writer import DataWriter, FileBasedDataWriter
 from magic_pdf.config.make_content_config import DropMode, MakeMode
 from magic_pdf.config.enums import SupportedPdfParseMethod
 from magic_pdf.config.constants import PARSE_TYPE_TXT, PARSE_TYPE_OCR

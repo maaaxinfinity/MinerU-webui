@@ -4,17 +4,20 @@ import copy
 
 from loguru import logger
 
-from magic_pdf.pipe.UNIPipe import UNIPipe
-from magic_pdf.pipe.OCRPipe import OCRPipe
-from magic_pdf.pipe.TXTPipe import TXTPipe
+# 更新导入路径以适配新版MinerU
+from magic_pdf.data.dataset import Dataset, PymuDocDataset
+from magic_pdf.operators.models import InferenceResult
+from magic_pdf.operators.pipes import PipeResult
+from magic_pdf.data.data_reader_writer import DataWriter, FileBasedDataWriter
+from magic_pdf.config.make_content_config import DropMode, MakeMode
+from magic_pdf.config.enums import SupportedPdfParseMethod
+from magic_pdf.config.constants import PARSE_TYPE_TXT, PARSE_TYPE_OCR
 from magic_pdf.dict2md.ocr_mkcontent import ocr_mk_mm_markdown_with_para_and_pagination
-from magic_pdf.rw.DiskReaderWriter import DiskReaderWriter
 import magic_pdf.model as model_config
 from fastapi import FastAPI, File, Response, UploadFile, Form
 from fastapi.responses import FileResponse, JSONResponse
 from zip import export_zip
 model_config.__use_inside_model__ = True
-from magic_pdf.data.data_reader_writer import FileBasedDataWriter
 
 def init_model():
     from magic_pdf.model.doc_analyze_by_custom_model import ModelSingleton
@@ -32,6 +35,7 @@ def init_model():
 
 
 def json_md_dump(
+        infer_result,
         pipe,
         md_writer,
         pdf_name,
@@ -40,17 +44,19 @@ def json_md_dump(
         md_pages
 ):
     # 写入模型结果到 model.json
-    orig_model_list = copy.deepcopy(pipe.model_list)
-    md_writer.write_string(
-        f"model.json",
-        json.dumps(orig_model_list, ensure_ascii=False, indent=4)
-    )
+    if infer_result:
+        orig_model_list = copy.deepcopy(infer_result.get_infer_res())
+        md_writer.write_string(
+            f"model.json",
+            json.dumps(orig_model_list, ensure_ascii=False, indent=4)
+        )
 
     # 写入中间结果到 middle.json
-    md_writer.write_string(
-        f"middle.json",
-        json.dumps(pipe.pdf_mid_data, ensure_ascii=False, indent=4),
-    )
+    if hasattr(pipe, '_pipe_res'):
+        md_writer.write_string(
+            f"middle.json",
+            json.dumps(pipe._pipe_res, ensure_ascii=False, indent=4),
+        )
 
     # text文本结果写入到 conent_list.json
     md_writer.write_string(
@@ -65,8 +71,8 @@ def json_md_dump(
         # md_content
         md_writer.write_string(
             f"{item['page_no']}.md",
-        item['md_content']
-    )
+            item['md_content']
+        )
 
 
     md_writer.write_string(
@@ -116,52 +122,68 @@ def pdf_parse_main(
             model_json = []
 
         # 执行解析步骤
-        # image_writer = DiskReaderWriter(output_image_path)
-        image_writer, md_writer = FileBasedDataWriter(output_image_path), FileBasedDataWriter(output_path)
-
+        image_writer = FileBasedDataWriter(output_image_path)
+        md_writer = FileBasedDataWriter(output_path)
+        
+        # 创建Dataset对象
+        ds = PymuDocDataset(pdf_bytes)
+        
         # 选择解析方式
-        if parse_method == "auto":
-            jso_useful_key = {"_pdf_type": "", "model_list": model_json}
-            pipe = UNIPipe(pdf_bytes, jso_useful_key, image_writer)
-        elif parse_method == "txt":
-            pipe = TXTPipe(pdf_bytes, model_json, image_writer)
-        elif parse_method == "ocr":
-            pipe = OCRPipe(pdf_bytes, model_json, image_writer)
+        infer_result = None
+        pipe = None
+        
+        if model_json:
+            # 使用已有的模型数据
+            infer_result = InferenceResult(model_json, ds)
+            if parse_method == "ocr":
+                pipe = infer_result.pipe_ocr_mode(image_writer, debug_mode=True)
+            elif parse_method == "txt":
+                pipe = infer_result.pipe_txt_mode(image_writer, debug_mode=True)
+            else:  # auto
+                if ds.classify() == SupportedPdfParseMethod.TXT:
+                    pipe = infer_result.pipe_txt_mode(image_writer, debug_mode=True)
+                else:
+                    pipe = infer_result.pipe_ocr_mode(image_writer, debug_mode=True)
         else:
-            logger.error("unknown parse method, only auto, ocr, txt allowed")
-            exit(1)
-
-        # 执行分类
-        pipe.pipe_classify()
-
-        # 如果没有传入模型数据，则使用内置模型解析
-        if not model_json:
+            # 使用内置模型
             if model_config.__use_inside_model__:
-                pipe.pipe_analyze()  # 解析
+                from magic_pdf.model.doc_analyze_by_custom_model import doc_analyze
+                
+                if parse_method == "auto":
+                    if ds.classify() == SupportedPdfParseMethod.TXT:
+                        infer_result = ds.apply(doc_analyze, ocr=False)
+                        pipe = infer_result.pipe_txt_mode(image_writer, debug_mode=True)
+                    else:
+                        infer_result = ds.apply(doc_analyze, ocr=True)
+                        pipe = infer_result.pipe_ocr_mode(image_writer, debug_mode=True)
+                elif parse_method == "txt":
+                    infer_result = ds.apply(doc_analyze, ocr=False)
+                    pipe = infer_result.pipe_txt_mode(image_writer, debug_mode=True)
+                elif parse_method == "ocr":
+                    infer_result = ds.apply(doc_analyze, ocr=True)
+                    pipe = infer_result.pipe_ocr_mode(image_writer, debug_mode=True)
             else:
-                logger.error("need model list input")
-                exit(1)
+                logger.error("内置模型不可用，需要提供模型数据")
+                return None
 
+        # 获取内容
+        content_list = pipe.get_content_list(image_path_parent, drop_mode=DropMode.NONE)
+        md_content = pipe.get_markdown(image_path_parent, drop_mode=DropMode.NONE)
 
-
-    
-        # 执行解析
-        pipe.pipe_parse()
-        # 保存 text 和 md 格式的结果
-        content_list = pipe.pipe_mk_uni_format(image_path_parent, drop_mode="none")
-        md_content = pipe.pipe_mk_markdown(image_path_parent, drop_mode="none")
-
-        # 获得分页信息
-        pdf_info_list = pipe.pdf_mid_data["pdf_info"]
-        md_pages = ocr_mk_mm_markdown_with_para_and_pagination(pdf_info_list,image_path_parent)
-
-
+        # 获得分页信息 - 需要根据新API进行调整
+        md_pages = []
+        if hasattr(pipe, '_pipe_res') and 'pdf_info' in pipe._pipe_res:
+            pdf_info_list = pipe._pipe_res['pdf_info']
+            md_pages = ocr_mk_mm_markdown_with_para_and_pagination(pdf_info_list, image_path_parent)
+        
         if is_json_md_dump:
-            json_md_dump(pipe, md_writer, pdf_name, content_list, md_content,md_pages)
-
+            json_md_dump(infer_result, pipe, md_writer, pdf_name, content_list, md_content, md_pages)
+            
+        return [md_content, os.path.join(output_path, f"{pdf_name}.md")]
 
     except Exception as e:
         logger.exception(e)
+        return None
 
 
 
