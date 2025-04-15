@@ -522,38 +522,64 @@ def convert_image_paths_for_gradio(markdown_content):
     import re
     import os
     
+    # 获取当前目录的绝对路径
+    base_dir = os.path.abspath(os.path.dirname(__file__))
+    
     # 函数：检查图片文件是否存在并记录日志
     def check_image_exists(path):
-        full_path = os.path.join(os.path.dirname(__file__), path.lstrip('./'))
+        full_path = os.path.join(base_dir, path.lstrip('./'))
         exists = os.path.exists(full_path)
         if exists:
             logger.info(f"图片文件存在: {full_path}")
         else:
             logger.warning(f"图片文件不存在: {full_path}")
-        return exists
-    
-    # 1. 对于/file=.temp/格式的路径进行修复
-    # 转换 /file=.temp/xxx/images/yyy.jpg 为 ./temp/xxx/images/yyy.jpg
-    def replace_file_path(match):
-        path = match.group(1)
-        new_path = f"./temp/{path}"
-        check_image_exists(new_path)
-        return new_path
+        return exists, full_path
     
     # 处理图片路径格式1: ![xxx](/file=.temp/...)
+    def img_replace(match):
+        path = match.group(1)
+        exists, full_path = check_image_exists(f"temp/{path}")
+        if exists:
+            # 使用绝对路径，确保图片可以被加载
+            return f'![](file://{full_path})'
+        return f'![](./temp/{path})'
+    
+    # 处理HTML图片标签
+    def img_tag_replace(match):
+        path = match.group(1)
+        exists, full_path = check_image_exists(f"temp/{path}")
+        if exists:
+            # 使用绝对路径，确保图片可以被加载
+            return f'<img src="file://{full_path}"'
+        return f'<img src="./temp/{path}"'
+    
+    # 替换Markdown格式的图片
     markdown_content = re.sub(
         r'!\[.*?\]\(/file=\.temp/([^)]+)\)', 
-        lambda m: f'![](./temp/{m.group(1)})', 
+        img_replace, 
         markdown_content
     )
     
-    # 处理图片路径格式2: <img src="/file=.temp/...">
+    # 替换HTML格式的图片
     markdown_content = re.sub(
         r'<img\s+src=["\']?/file=\.temp/([^"\'\s>]+)["\']?', 
-        lambda m: f'<img src="./temp/{m.group(1)}"', 
+        img_tag_replace, 
         markdown_content
     )
     
+    # 添加处理新格式图片的代码，例如直接处理images路径开头的图片
+    if re.search(r'!\[.*?\]\(images/', markdown_content):
+        logger.info("检测到直接的images/路径")
+        pdf_name = re.search(r'/file=\.temp/([^/]+)/', markdown_content)
+        if pdf_name:
+            pdf_name = pdf_name.group(1)
+            # 替换直接的images路径
+            markdown_content = re.sub(
+                r'!\[.*?\]\(images/([^)]+)\)', 
+                lambda m: f'![](file://{base_dir}/temp/{pdf_name}/images/{m.group(1)})',
+                markdown_content
+            )
+            
     # 输出处理后的部分内容用于调试
     logger.info(f"处理后的markdown部分内容: {markdown_content[:200] if len(markdown_content) > 200 else markdown_content}")
     
@@ -938,9 +964,12 @@ if __name__ == '__main__':
                     padding: 5px 0;
                 }
                 /* 修复Gradio Markdown渲染器中的图片显示问题 */
-                .gradio-markdown img {
+                .gradio-markdown img,
+                [id^="component-"] img,
+                .markdown img {
                     display: block !important;
                     max-width: 100%;
+                    margin: 10px auto;
                 }
                 /* 允许各种图片容器能正确显示图片 */
                 .markdown-body img,
@@ -954,6 +983,7 @@ if __name__ == '__main__':
                     visibility: visible !important;
                     display: block !important;
                     opacity: 1 !important;
+                    max-width: 100% !important;
                 }
             </style>
 
@@ -967,13 +997,37 @@ if __name__ == '__main__':
                             img.style.visibility = 'visible';
                             img.style.opacity = '1';
                             
-                            // 如果src包含/file=前缀，尝试修复
+                            // 如果src包含/file=前缀，尝试使用file://前缀
                             if (img.src && img.src.includes('/file=')) {
-                                let newSrc = img.src.replace('/file=', './');
-                                console.log('Fixed image path:', img.src, '->', newSrc);
-                                img.src = newSrc;
+                                // 尝试使用现代浏览器支持的协议
+                                try {
+                                    let tempPath = img.src.replace('/file=', '/');
+                                    console.log('Fixed image path:', img.src, '->', tempPath);
+                                    img.src = tempPath;
+                                } catch(e) {
+                                    console.error('Image path fix error:', e);
+                                }
+                            }
+                            
+                            // 尝试添加onerror处理器来替代broken images
+                            if (!img.hasAttribute('data-error-handler')) {
+                                img.setAttribute('data-error-handler', 'true');
+                                img.onerror = function() {
+                                    console.log('Image failed to load:', this.src);
+                                    // 尝试其他路径格式
+                                    if (this.src.includes('/temp/')) {
+                                        this.src = this.src.replace('/temp/', '/.temp/');
+                                    } else if (this.src.includes('/.temp/')) {
+                                        this.src = this.src.replace('/.temp/', '/temp/');
+                                    }
+                                };
                             }
                         });
+                        
+                        // 检查数学公式渲染
+                        if (typeof MathJax !== 'undefined') {
+                            MathJax.typesetPromise();
+                        }
                     }, 1000);
                 });
             </script>
@@ -992,7 +1046,7 @@ if __name__ == '__main__':
             server_name='127.0.0.1', 
             server_port=port, 
             share=False, 
-            allowed_paths=[".", ".temp", "static", "examples", "/"],  # 允许访问所有相关目录
+            allowed_paths=[".", ".temp", "temp", "static", "examples", "/", os.path.dirname(__file__)],  # 允许访问所有相关目录
             debug=True,
             show_error=True,  # 显示错误信息，帮助调试
         )
