@@ -223,3 +223,30 @@ python webui.py
 ## TODO：
 - [ ] 支持进度查看
 - [ ] 支持多文件上传，批处理
+
+## 常见问题
+
+### 文件上传失败：目录不存在错误
+
+如果遇到以下错误：
+```
+FileNotFoundError: [Errno 2] No such file or directory: '/path/to/.temp/your_file.pdf'
+```
+
+这是因为程序无法找到`.temp`目录。解决方法：
+
+1. 确保在MinerU-webui目录下创建了`.temp`目录：
+```bash
+mkdir -p .temp
+```
+
+2. 如果使用的是最新版代码，程序会自动创建此目录，无需手动创建
+
+### 使用API服务时的目录问题
+
+如果使用API服务，确保`uploads`目录也存在：
+```bash
+mkdir -p uploads
+```
+
+最新版的代码已经处理了目录自动创建的问题。

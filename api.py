@@ -203,6 +203,11 @@ OUTPUT_DIRECTORY = os.path.join(UPLOAD_DIRECTORY, output)
 os.makedirs(UPLOAD_DIRECTORY, exist_ok=True)
 os.makedirs(OUTPUT_DIRECTORY, exist_ok=True)
 
+# 在应用启动前确保临时目录存在
+temp_dir = os.path.join(BASE_DIR, ".temp")
+os.makedirs(temp_dir, exist_ok=True)
+logger.info(f"确保目录存在: {UPLOAD_DIRECTORY}, {OUTPUT_DIRECTORY}, {temp_dir}")
+
 
 
  

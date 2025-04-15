@@ -216,10 +216,14 @@ def export_zip(base_path):
 
 def pdf_parse( pdf_path: str,
         progress=gr.Progress()):
+    # 确保.temp目录存在
+    temp_dir = os.path.join(os.path.dirname(__file__), ".temp")
+    os.makedirs(temp_dir, exist_ok=True)
+    
     # 文件迁移到脚本目录的.temp
-    file_name  = os.path.basename(pdf_path)
+    file_name = os.path.basename(pdf_path)
     pdf_name = file_name.split(".")[0]
-    target_pdf_path = os.path.join(os.path.dirname(__file__), ".temp",file_name )
+    target_pdf_path = os.path.join(os.path.dirname(__file__), ".temp", file_name)
     # 复制文件到脚本目录的.temp
     with open(target_pdf_path, "wb") as f:
         f.write(open(pdf_path, "rb").read())
@@ -258,5 +262,10 @@ with gr.Blocks() as demo:
 logger.info(f"waiting for model init")
 model_init = init_model()
 logger.info(f"model_init: {model_init}")
+
+# 确保.temp目录存在
+temp_dir = os.path.join(os.path.dirname(__file__), ".temp")
+os.makedirs(temp_dir, exist_ok=True)
+logger.info(f"确保.temp目录存在: {temp_dir}")
 
 demo.queue().launch(inbrowser=True,allowed_paths=["./temp"])
