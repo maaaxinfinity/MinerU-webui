@@ -6,6 +6,25 @@ import webbrowser
 import threading
 import socket
 import time
+import gradio as gr
+import os
+import subprocess
+import re
+import time
+import json
+import zipfile
+import socket
+import webbrowser
+import sys
+import logging
+import argparse
+import traceback
+import platform
+import shutil
+from typing import List, Dict, Tuple, Any, Optional, Union
+from datetime import datetime
+from pdf2image import convert_from_path
+import threading
 
 from loguru import logger
 
@@ -21,7 +40,8 @@ import magic_pdf.model as model_config
 
 model_config.__use_inside_model__ = True
 import gradio as gr
-from gradio_pdf import PDF
+# 移除PDF组件导入
+# from gradio_pdf import PDF
 from pdf2image import convert_from_path
 import threading
 
@@ -291,8 +311,26 @@ def pdf_parse(pdf_path: str, progress=gr.Progress(), is_ocr=False, formula_enabl
             logger.info("处理完成，已替换图片路径")
         else:
             logger.warning("处理完成，但markdown内容为空")
+        
+        # 如果存在layout_pdf_path，将其转换为图片
+        preview_image_path = None
+        if layout_pdf_path and os.path.exists(layout_pdf_path):
+            try:
+                # 创建预览图片存储目录
+                preview_dir = os.path.join(temp_dir, "preview")
+                os.makedirs(preview_dir, exist_ok=True)
+                
+                # 将PDF的第一页转换为图片
+                preview_image_path = os.path.join(preview_dir, f"{pdf_name}_layout_preview.png")
+                images = convert_from_path(layout_pdf_path, first_page=1, last_page=1)
+                if images and len(images) > 0:
+                    images[0].save(preview_image_path, 'PNG')
+                    logger.info(f"创建了布局预览图: {preview_image_path}")
+            except Exception as e:
+                logger.exception(f"创建布局预览图失败: {str(e)}")
+                preview_image_path = None
             
-        return [markdown_content, file_path, layout_pdf_path, status_msg]
+        return [markdown_content, file_path, preview_image_path, status_msg]
         
     except Exception as e:
         logger.exception(f"PDF处理过程中发生错误: {str(e)}")
@@ -363,16 +401,16 @@ if __name__ == '__main__':
     with open(header_path, "r", encoding="utf-8") as file:
         header = file.read()
 
-    with gr.Blocks(analytics_enabled=False, title="Mineru PDF处理") as demo:
+    with gr.Blocks(analytics_enabled=False, title="Mineru PDF处理", theme=gr.themes.Base()) as demo:
         try:
             # 添加HTML头部
             gr.HTML(header)
             
             with gr.Row():
-                with gr.Column(variant='panel', scale=5):
+                with gr.Column(variant='default', scale=5):
                     with gr.Tabs():
                         with gr.Tab('上传文件'):
-                            # 尝试直接使用gr.File而不是PDF组件
+                            # 使用简单的文件上传组件
                             pdf_input = gr.File(label="上传PDF文档", file_types=[".pdf"], interactive=True)
                             gr.HTML("<div style='margin-top:10px; margin-bottom:10px; color:#666;'>支持PDF文件格式</div>")
                             # 添加调试信息显示
@@ -385,7 +423,7 @@ if __name__ == '__main__':
                                 if examples:
                                     gr.Examples(examples=examples, inputs=pdf_input)
                 
-                with gr.Column(variant='panel', scale=5):
+                with gr.Column(variant='default', scale=5):
                     # 增加高级设置选项
                     max_pages = gr.Slider(1, 100000, 1000, step=1, label='最大转换页数')
                     with gr.Row():
@@ -399,30 +437,28 @@ if __name__ == '__main__':
                         export_button = gr.Button('打包下载')
                         clear_button = gr.ClearButton(value='清空')
                 
-                with gr.Column(variant='panel', scale=5):
-                    with gr.Tabs():
-                        download_output = gr.File(label='转换结果压缩包', interactive=False, height=50)
-                        status_output = gr.Textbox(label='处理状态', interactive=False)
+                with gr.Column(variant='default', scale=5):
+                    status_output = gr.Textbox(label='处理状态', interactive=False)
+                    download_output = gr.File(label='转换结果压缩包', interactive=False)
 
             with gr.Row():
-                with gr.Column(variant='panel', scale=5):
-                    # 这里显示PDF预览
-                    preview_pdf = PDF(label='布局预览', interactive=False, visible=True, height=800)
+                with gr.Column(variant='default', scale=5):
+                    # 使用图片展示而不是PDF链接
+                    preview_image = gr.Image(label='布局预览', interactive=False)
                     
-                with gr.Column(variant='panel', scale=5):
+                with gr.Column(variant='default', scale=5):
                     with gr.Tabs():
                         with gr.Tab('Markdown 渲染'):
                             markdown_output = gr.Markdown(
                                 label="识别结果", 
-                                height=800, 
+                                height=600, 
                                 show_copy_button=True,
-                                latex_delimiters=latex_delimiters,
                                 line_breaks=True
                             )
                         with gr.Tab('Markdown 源码'):
                             md_text = gr.TextArea(
                                 label="源代码", 
-                                lines=60, 
+                                lines=40, 
                                 show_copy_button=True
                             )
             
@@ -431,7 +467,7 @@ if __name__ == '__main__':
             
             # 添加PDF输入变化的事件处理
             pdf_input.change(
-                lambda x: f"选择的文件: {x.name if x and hasattr(x, 'name') else '无文件'}", 
+                lambda x: f"选择的文件: {str(x)[:100] if x else '无文件'}", 
                 inputs=[pdf_input], 
                 outputs=[pdf_debug]
             )
@@ -444,26 +480,32 @@ if __name__ == '__main__':
                     return [None, None, None, "请先上传PDF文件"]
                 
                 # 检查文件是否有效
-                if isinstance(pdf_file, list) and len(pdf_file) > 0:
-                    # 如果传入的是文件列表，取第一个
-                    pdf_path = pdf_file[0].name
-                elif hasattr(pdf_file, 'name'):
-                    # 如果传入的是单个文件对象
-                    pdf_path = pdf_file.name
-                else:
-                    # 如果传入的是字符串路径
-                    pdf_path = pdf_file
-                
-                # 记录当前处理的参数
-                logger.info(f"处理参数: 文件={pdf_path}, OCR={is_ocr}, 公式={formula_enable}, 表格={table_enable}, 语言={language}, 最大页数={max_pages}")
-                # 调用PDF处理函数
-                return pdf_parse(pdf_path, None, is_ocr, formula_enable, table_enable, language, max_pages)
+                try:
+                    if isinstance(pdf_file, list) and len(pdf_file) > 0:
+                        # 如果传入的是文件列表，取第一个
+                        pdf_path = pdf_file[0].name
+                    elif hasattr(pdf_file, 'name'):
+                        # 如果传入的是单个文件对象
+                        pdf_path = pdf_file.name
+                    else:
+                        # 如果传入的是字符串路径
+                        pdf_path = pdf_file
+                    
+                    # 记录当前处理的参数
+                    logger.info(f"处理参数: 文件={pdf_path}, OCR={is_ocr}, 公式={formula_enable}, 表格={table_enable}, 语言={language}, 最大页数={max_pages}")
+                    # 调用PDF处理函数
+                    [md_content, file_path, preview_image_path, status_msg] = pdf_parse(pdf_path, None, is_ocr, formula_enable, table_enable, language, max_pages)
+                    
+                    return [md_content, file_path, preview_image_path, status_msg]
+                except Exception as e:
+                    logger.exception(f"处理文件出错: {str(e)}")
+                    return [None, None, None, f"处理文件出错: {str(e)}"]
             
             # 绑定提取按钮点击事件
             extract_button.click(
                 handle_extract,
                 inputs=[pdf_input, is_ocr, formula_enable, table_enable, language, max_pages], 
-                outputs=[markdown_output, base_path, preview_pdf, status_output]
+                outputs=[markdown_output, base_path, preview_image, status_output]
             )
             
             export_button.click(
@@ -474,13 +516,13 @@ if __name__ == '__main__':
             
             # 将markdown_output添加到md_text用于显示源码
             markdown_output.change(
-                lambda x: x, 
+                lambda x: x if x else "", 
                 inputs=[markdown_output], 
                 outputs=[md_text]
             )
             
             # 添加清空按钮
-            clear_button.add([pdf_input, markdown_output, md_text, download_output, preview_pdf, status_output])
+            clear_button.add([pdf_input, markdown_output, md_text, download_output, preview_image, status_output, pdf_debug])
 
         except Exception as e:
             logger.exception(f"界面创建出错: {str(e)}")
