@@ -374,7 +374,7 @@ if __name__ == '__main__':
         with gr.Row():
             with gr.Column(variant='panel', scale=5):
                 # 这里显示PDF预览
-                preview_pdf = gr.PDF(label='布局预览', interactive=False, visible=True, height=800)
+                preview_pdf = PDF(label='布局预览', interactive=False, visible=True, height=800)
                 
             with gr.Column(variant='panel', scale=5):
                 with gr.Tabs():
