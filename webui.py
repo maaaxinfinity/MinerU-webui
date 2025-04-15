@@ -315,48 +315,37 @@ def pdf_parse(pdf_path: str, progress=gr.Progress(), is_ocr=False, formula_enabl
             generate_preview=generate_preview
         )
         
-        # 替换markdown_content的所有图片，增加 /file=相对路径
+        # 替换markdown_content的所有图片，增加相对路径
         if markdown_content:
-            # 改进图片路径替换逻辑，处理更多图片格式和路径情况
             import re
             
-            # 首先修复可能出现的双重路径问题
-            # 例如 /file=.temp/xxx//file=.temp/xxx/ -> /file=.temp/xxx/
-            double_path_pattern = r'/file=\.temp/([^/]+)//file=\.temp/([^/]+)/'
-            if re.search(double_path_pattern, markdown_content):
-                markdown_content = re.sub(double_path_pattern, r'/file=.temp/\1/', markdown_content)
-                logger.info("检测到并修复了双重路径问题")
-                
-            # 处理错误的图片路径，例如images/xxx被误替换为/file=.temp/xxx/images/xxx
-            wrong_image_path = r'/file=\.temp/([^/]+)/images/'
-            if re.search(wrong_image_path, markdown_content):
-                markdown_content = re.sub(wrong_image_path, r'/file=.temp/\1/images/', markdown_content)
-                logger.info("修复了错误的图片路径")
+            # 获取PDF文件名（不含扩展名）
+            pdf_name = file_name.split(".")[0]
+            logger.info(f"PDF文件名: {pdf_name}")
             
-            # 防止重复替换，先检查markdown内容中是否已经包含/file=路径
-            if "/file=.temp/" not in markdown_content:
-                # 1. 处理基本的Markdown图片引用 ![]()
-                markdown_content = re.sub(r'!\[\]\((?!http|https|/file=)([^)]+)\)', 
-                                     r'![](/file=.temp/' + pdf_name + r'/\1)', 
-                                     markdown_content)
-                
-                # 2. 处理包含alt文本的图片引用 ![alt](path)，但避免处理外部链接和已处理的链接
-                markdown_content = re.sub(r'!\[(.*?)\]\((?!http|https|/file=)([^)]+)\)', 
-                                     r'![\1](/file=.temp/' + pdf_name + r'/\2)', 
-                                     markdown_content)
-                
-                # 3. 处理HTML图片标签
-                markdown_content = re.sub(r'<img\s+src=["\'](?!http|https|/file=)([^"\']+)["\']', 
-                                     r'<img src="/file=.temp/' + pdf_name + r'/\1"', 
-                                     markdown_content)
-                
-                logger.info("处理完成，已替换所有图片路径")
-            else:
-                logger.info("图片路径已包含/file=前缀，跳过重复替换")
-                
-                # 修复路径中的特殊模式
-                # 处理存在的双斜杠问题，如 /file=.temp/xxx//images/ -> /file=.temp/xxx/images/
-                markdown_content = re.sub(r'(/file=\.temp/[^/]+/)/', r'\1', markdown_content)
+            # 简化图片路径处理逻辑，直接使用.temp目录
+            # 1. 处理基本的Markdown图片引用 ![]()
+            markdown_content = re.sub(
+                r'!\[\]\(([^)]+)\)',
+                lambda m: f'![](./.temp/{pdf_name}/images/{os.path.basename(m.group(1))})',
+                markdown_content
+            )
+            
+            # 2. 处理带文本描述的Markdown图片引用 ![alt](path)
+            markdown_content = re.sub(
+                r'!\[(.*?)\]\(([^)]+)\)',
+                lambda m: f'![$1](./.temp/{pdf_name}/images/{os.path.basename(m.group(2))})',
+                markdown_content
+            )
+            
+            # 3. 处理HTML图片标签
+            markdown_content = re.sub(
+                r'<img\s+src=["\']([^"\']+)["\']',
+                lambda m: f'<img src="./.temp/{pdf_name}/images/{os.path.basename(m.group(1))}"',
+                markdown_content
+            )
+            
+            logger.info(f"处理完成，已替换所有图片路径")
         else:
             logger.warning("处理完成，但markdown内容为空")
         
@@ -520,68 +509,48 @@ def convert_image_paths_for_gradio(markdown_content):
         return ""
     
     import re
-    import os
     
-    # 获取当前目录的绝对路径
-    base_dir = os.path.abspath(os.path.dirname(__file__))
+    # 从markdown内容中提取文档名
+    doc_name = None
+    # 尝试从文件路径中提取文档名
+    file_path_match = re.search(r'\.temp/([^/]+)/', markdown_content)
+    if file_path_match:
+        doc_name = file_path_match.group(1)
+        logger.info(f"从Markdown提取的文档名: {doc_name}")
     
-    # 函数：检查图片文件是否存在并记录日志
-    def check_image_exists(path):
-        full_path = os.path.join(base_dir, path.lstrip('./'))
-        exists = os.path.exists(full_path)
-        if exists:
-            logger.info(f"图片文件存在: {full_path}")
-        else:
-            logger.warning(f"图片文件不存在: {full_path}")
-        return exists, full_path
+    # 简化处理逻辑：直接引用.temp目录
     
-    # 处理图片路径格式1: ![xxx](/file=.temp/...)
-    def img_replace(match):
-        path = match.group(1)
-        exists, full_path = check_image_exists(f"temp/{path}")
-        if exists:
-            # 使用绝对路径，确保图片可以被加载
-            return f'![](file://{full_path})'
-        return f'![](./temp/{path})'
-    
-    # 处理HTML图片标签
-    def img_tag_replace(match):
-        path = match.group(1)
-        exists, full_path = check_image_exists(f"temp/{path}")
-        if exists:
-            # 使用绝对路径，确保图片可以被加载
-            return f'<img src="file://{full_path}"'
-        return f'<img src="./temp/{path}"'
-    
-    # 替换Markdown格式的图片
+    # 1. 处理 /file=.temp/ 格式
     markdown_content = re.sub(
         r'!\[.*?\]\(/file=\.temp/([^)]+)\)', 
-        img_replace, 
+        r'![](/.temp/\1)', 
         markdown_content
     )
     
-    # 替换HTML格式的图片
+    # 2. 处理 HTML 图片标签
     markdown_content = re.sub(
         r'<img\s+src=["\']?/file=\.temp/([^"\'\s>]+)["\']?', 
-        img_tag_replace, 
+        r'<img src="/.temp/\1"', 
         markdown_content
     )
     
-    # 添加处理新格式图片的代码，例如直接处理images路径开头的图片
-    if re.search(r'!\[.*?\]\(images/', markdown_content):
-        logger.info("检测到直接的images/路径")
-        pdf_name = re.search(r'/file=\.temp/([^/]+)/', markdown_content)
-        if pdf_name:
-            pdf_name = pdf_name.group(1)
-            # 替换直接的images路径
-            markdown_content = re.sub(
-                r'!\[.*?\]\(images/([^)]+)\)', 
-                lambda m: f'![](file://{base_dir}/temp/{pdf_name}/images/{m.group(1)})',
-                markdown_content
-            )
-            
-    # 输出处理后的部分内容用于调试
-    logger.info(f"处理后的markdown部分内容: {markdown_content[:200] if len(markdown_content) > 200 else markdown_content}")
+    # 3. 处理直接引用 images 目录的情况
+    if doc_name:
+        markdown_content = re.sub(
+            r'!\[.*?\]\(images/([^)]+)\)', 
+            r'![](./.temp/' + doc_name + r'/images/\1)', 
+            markdown_content
+        )
+        
+        # 4. 处理 HTML images 路径
+        markdown_content = re.sub(
+            r'<img\s+src=["\']?images/([^"\'\s>]+)["\']?', 
+            r'<img src="./.temp/' + doc_name + r'/images/\1"', 
+            markdown_content
+        )
+    
+    # 记录处理结果
+    logger.info(f"处理后的markdown部分内容: {markdown_content[:200]}")
     
     return markdown_content
 
@@ -1046,7 +1015,7 @@ if __name__ == '__main__':
             server_name='127.0.0.1', 
             server_port=port, 
             share=False, 
-            allowed_paths=[".", ".temp", "temp", "static", "examples", "/", os.path.dirname(__file__)],  # 允许访问所有相关目录
+            allowed_paths=[".", ".temp", "temp", "static", "examples", "/"],  # 允许访问相关目录
             debug=True,
             show_error=True,  # 显示错误信息，帮助调试
         )
