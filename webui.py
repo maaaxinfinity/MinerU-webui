@@ -73,7 +73,8 @@ def pdf_parse_main(
         formula_enable: bool = True,
         table_enable: bool = True,
         language: str = 'auto',
-        end_pages: int = 1000
+        end_pages: int = 1000,
+        generate_preview: bool = True
 ):
     """
     执行从 pdf 转换到 json、md 的过程，输出 md 和 json 文件到 pdf 文件所在的目录
@@ -87,6 +88,7 @@ def pdf_parse_main(
     :param table_enable: 是否启用表格识别
     :param language: 识别语言，auto为自动识别
     :param end_pages: 最大处理页数
+    :param generate_preview: 是否生成布局预览
     """
     # 添加对progress的检查
     if progress is None:
@@ -216,7 +218,7 @@ def pdf_parse_main(
         
         # 生成PDF布局预览
         layout_pdf_path = None
-        if hasattr(pipe, 'draw_layout'):
+        if hasattr(pipe, 'draw_layout') and generate_preview:
             layout_pdf_path = os.path.join(output_path, f"{pdf_name}_layout.pdf")
             pipe.draw_layout(layout_pdf_path)
         
@@ -270,7 +272,7 @@ def export_zip(base_path):
     return zip_file_path
 
 
-def pdf_parse(pdf_path: str, progress=gr.Progress(), is_ocr=False, formula_enable=True, table_enable=True, language="auto", max_pages=1000):
+def pdf_parse(pdf_path: str, progress=gr.Progress(), is_ocr=False, formula_enable=True, table_enable=True, language="auto", max_pages=1000, generate_preview=True):
     try:
         # 检查pdf_path是否有效
         if not pdf_path:
@@ -309,7 +311,8 @@ def pdf_parse(pdf_path: str, progress=gr.Progress(), is_ocr=False, formula_enabl
             formula_enable=formula_enable, 
             table_enable=table_enable,
             language=language,
-            end_pages=max_pages
+            end_pages=max_pages,
+            generate_preview=generate_preview
         )
         
         # 替换markdown_content的所有图片，增加 /file=相对路径
@@ -530,6 +533,9 @@ if __name__ == '__main__':
                         is_ocr = gr.Checkbox(label='强制启用OCR识别', value=False)
                         table_enable = gr.Checkbox(label='启用表格识别', value=True)
                     with gr.Row():
+                        generate_preview = gr.Checkbox(label='生成布局预览', value=True, info="更改此选项需要重新处理PDF")
+                        preview_status = gr.HTML(value="<div></div>")
+                    with gr.Row():
                         extract_button = gr.Button('开始抽取', variant='primary')
                         export_button = gr.Button('打包下载')
                         clear_button = gr.ClearButton(value='清空')
@@ -584,33 +590,69 @@ if __name__ == '__main__':
                     return None
                 return image_paths[page_num-1]
             
-            preview_slider.change(
-                update_preview,
-                inputs=[preview_slider, preview_images],
-                outputs=[preview_image]
-            )
-            
             # 处理Markdown渲染滑块变化
             def update_markdown(page_num, pages):
                 if not pages or page_num <= 0 or page_num > len(pages):
                     return ""
                 return pages[page_num-1]
             
-            markdown_slider.change(
-                update_markdown,
-                inputs=[markdown_slider, markdown_pages],
-                outputs=[markdown_output]
+            # 添加新函数：同步所有滑块
+            def sync_all_sliders(page_num, preview_images, markdown_pages):
+                """同步所有滑块到相同的页码"""
+                # 确保页码在有效范围内
+                if not preview_images or not markdown_pages:
+                    return [None, "", "", page_num, page_num, page_num]
+                
+                preview_max = len(preview_images)
+                md_max = len(markdown_pages)
+                
+                # 确保页码在有效范围内
+                if page_num <= 0:
+                    page_num = 1
+                elif page_num > min(preview_max, md_max):
+                    page_num = min(preview_max, md_max)
+                
+                # 获取相应页的预览图和Markdown内容
+                preview = update_preview(page_num, preview_images)
+                markdown = update_markdown(page_num, markdown_pages)
+                
+                # 返回所有更新的值
+                return [preview, markdown, markdown, page_num, page_num, page_num]
+            
+            # 将原来单独的滑块事件处理绑定替换为新的同步函数绑定
+            preview_slider.change(
+                sync_all_sliders,
+                inputs=[preview_slider, preview_images, markdown_pages],
+                outputs=[preview_image, markdown_output, md_text, preview_slider, markdown_slider, md_source_slider]
             )
             
-            # 处理Markdown源码滑块变化
+            markdown_slider.change(
+                sync_all_sliders,
+                inputs=[markdown_slider, preview_images, markdown_pages],
+                outputs=[preview_image, markdown_output, md_text, preview_slider, markdown_slider, md_source_slider]
+            )
+            
             md_source_slider.change(
-                update_markdown,
-                inputs=[md_source_slider, markdown_pages],
-                outputs=[md_text]
+                sync_all_sliders,
+                inputs=[md_source_slider, preview_images, markdown_pages],
+                outputs=[preview_image, markdown_output, md_text, preview_slider, markdown_slider, md_source_slider]
+            )
+            
+            # 添加布局预览开关状态变化的处理函数
+            def update_preview_status(generate_preview_value):
+                if generate_preview_value:
+                    return "<div style='color:green;margin-top:5px;'>布局预览已启用</div>"
+                else:
+                    return "<div style='color:orange;margin-top:5px;'>布局预览已禁用，如需开启请先勾选再重新处理</div>"
+
+            generate_preview.change(
+                update_preview_status,
+                inputs=[generate_preview],
+                outputs=[preview_status]
             )
             
             # 定义事件处理函数
-            def handle_extract(pdf_file, is_ocr, formula_enable, table_enable, language, max_pages):
+            def handle_extract(pdf_file, is_ocr, formula_enable, table_enable, language, max_pages, generate_preview):
                 # 先显示调试信息
                 if pdf_file is None:
                     logger.warning("未选择文件")
@@ -629,9 +671,9 @@ if __name__ == '__main__':
                         pdf_path = pdf_file
                     
                     # 记录当前处理的参数
-                    logger.info(f"处理参数: 文件={pdf_path}, OCR={is_ocr}, 公式={formula_enable}, 表格={table_enable}, 语言={language}, 最大页数={max_pages}")
-                    # 调用PDF处理函数，不再传递None作为progress参数
-                    [md_content, file_path, preview_image_path, status_msg] = pdf_parse(pdf_path, gr.Progress(), is_ocr, formula_enable, table_enable, language, max_pages)
+                    logger.info(f"处理参数: 文件={pdf_path}, OCR={is_ocr}, 公式={formula_enable}, 表格={table_enable}, 语言={language}, 最大页数={max_pages}, 生成预览={generate_preview}")
+                    # 调用PDF处理函数
+                    [md_content, file_path, preview_image_path, status_msg] = pdf_parse(pdf_path, gr.Progress(), is_ocr, formula_enable, table_enable, language, max_pages, generate_preview)
                     
                     # 获取所有预览图片
                     preview_images_list = get_preview_images(file_path)
@@ -667,7 +709,7 @@ if __name__ == '__main__':
             # 绑定提取按钮点击事件
             extract_button.click(
                 handle_extract,
-                inputs=[pdf_input, is_ocr, formula_enable, table_enable, language, max_pages], 
+                inputs=[pdf_input, is_ocr, formula_enable, table_enable, language, max_pages, generate_preview], 
                 outputs=[
                     markdown_output, 
                     base_path, 
@@ -701,7 +743,8 @@ if __name__ == '__main__':
                 preview_images,
                 preview_slider,
                 markdown_slider,
-                md_source_slider
+                md_source_slider,
+                preview_status
             ])
 
         except Exception as e:
