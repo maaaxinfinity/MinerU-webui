@@ -88,6 +88,13 @@ def pdf_parse_main(
     :param language: 识别语言，auto为自动识别
     :param end_pages: 最大处理页数
     """
+    # 添加对progress的检查
+    if progress is None:
+        def progress_dummy(value=0, desc=None):
+            if desc:
+                logger.info(desc)
+        progress = progress_dummy
+
     progress(0, desc="正在启动任务...")
     logger.info("任务开始处理了")
     
@@ -493,8 +500,8 @@ if __name__ == '__main__':
                     
                     # 记录当前处理的参数
                     logger.info(f"处理参数: 文件={pdf_path}, OCR={is_ocr}, 公式={formula_enable}, 表格={table_enable}, 语言={language}, 最大页数={max_pages}")
-                    # 调用PDF处理函数
-                    [md_content, file_path, preview_image_path, status_msg] = pdf_parse(pdf_path, None, is_ocr, formula_enable, table_enable, language, max_pages)
+                    # 调用PDF处理函数，不再传递None作为progress参数
+                    [md_content, file_path, preview_image_path, status_msg] = pdf_parse(pdf_path, gr.Progress(), is_ocr, formula_enable, table_enable, language, max_pages)
                     
                     return [md_content, file_path, preview_image_path, status_msg]
                 except Exception as e:
